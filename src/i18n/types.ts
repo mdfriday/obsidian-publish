@@ -305,6 +305,8 @@ export interface TranslationNamespace {
 		site_path: string;
 		site_path_placeholder: string;
 		site_path_hint: string;
+		site_path_share_placeholder: string;
+		site_path_share_hint: string;
 		site_password: string;
 		site_password_placeholder: string;
 		site_password_hint: string;

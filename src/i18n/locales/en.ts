@@ -377,6 +377,9 @@ export const en = {
 		site_path_placeholder: "/",
 		site_path_hint:
 			'Specify the base path for your site. Use "/" for root deployment.',
+		site_path_share_placeholder: "https://share.fsky.top/s/{siteId}/",
+		site_path_share_hint:
+			"Share-mode baseURL (baked in at build time). Set automatically on first publish when siteId is bound.",
 		site_password: "Site Password",
 		site_password_placeholder: "Enter site password",
 		site_password_hint: "Set a site-level access password (optional)",
@@ -411,6 +414,7 @@ export const en = {
 		copy_url: "Copy URL",
 		copy: "Copy",
 		realtime_publishing: "Realtime Publishing...",
+		realtime_publish: "Realtime publish",
 		auto_publish: "Auto Publish",
 		stop_publish: "Stop Publishing",
 		stop: "Stop",

@@ -668,6 +668,12 @@ export default class FridayPlugin extends Plugin {
 				await this.onPublishRequested(data as SiteEventData['publishRequested']);
 				break;
 
+			case 'buildAndPublishRequested':
+				await this.onBuildAndPublishRequested(
+					data as SiteEventData['buildAndPublishRequested'],
+				);
+				break;
+
 			case 'testConnection':
 				await this.onTestConnection(data as SiteEventData['testConnection']);
 				break;
@@ -730,22 +736,74 @@ export default class FridayPlugin extends Plugin {
 
 		const { projectName, port, renderer, publishConfig } = data;
 
-		// Create progress callback
 		const onProgress = (progress: any) => {
-			// Send progress updates to Site component
+			if (
+				publishConfig &&
+				(progress.phase === 'publishing' || progress.phase === 'publish-success')
+			) {
+				if (progress.phase === 'publish-success') {
+					this.siteComponent?.onPublishComplete?.({
+						url: progress.data?.publishUrl,
+					});
+					return;
+				}
+				this.siteComponent?.updatePublishProgress?.({
+					phase: progress.phase === 'publishing' ? 'uploading' : 'complete',
+					percentage: progress.percentage ?? 0,
+					message: progress.message,
+				});
+				return;
+			}
 			this.siteComponent?.updateBuildProgress?.(progress);
 		};
 
-		// Start preview with optional publishConfig for auto-publish
 		const result = await this.projectServiceManager.startPreview(
 			projectName,
 			{ port, renderer, onProgress, publishConfig }
 		);
 
 		if (result.success) {
-			this.siteComponent?.onPreviewStarted?.(result);
+			if (result.publishUrl) {
+				this.siteComponent?.onPublishComplete?.({ url: result.publishUrl });
+			} else {
+				this.siteComponent?.onPreviewStarted?.(result);
+			}
 		} else {
-			this.siteComponent?.onPreviewError?.(result.error);
+			if (publishConfig) {
+				this.siteComponent?.onPublishError?.(result.error || 'Publish failed');
+			} else {
+				this.siteComponent?.onPreviewError?.(result.error);
+			}
+		}
+	}
+
+	private async onBuildAndPublishRequested(
+		data: SiteEventData['buildAndPublishRequested'],
+	) {
+		if (!this.projectServiceManager) {
+			return;
+		}
+
+		const onProgress = (progress: any) => {
+			if (progress.phase === 'building' || progress.phase === 'build-success') {
+				this.siteComponent?.updateBuildProgress?.(progress);
+			} else {
+				this.siteComponent?.updatePublishProgress?.(progress);
+			}
+		};
+
+		const result = await this.projectServiceManager.buildAndPublishCloudflare(
+			data.projectName,
+			{ onProgress },
+		);
+
+		if (result.success) {
+			this.siteComponent?.onPublishComplete?.(result);
+			if (result.baseURL && this.siteComponent?.setSitePath) {
+				this.siteComponent.setSitePath(result.baseURL);
+			}
+		} else {
+			this.siteComponent?.onPublishError?.(result.error || 'Publish failed');
 		}
 	}
 
@@ -1251,21 +1309,11 @@ export default class FridayPlugin extends Plugin {
 
 			await new Promise(resolve => setTimeout(resolve, 500));
 
-			if (this.siteComponent?.setSitePath) {
-				this.siteComponent.setSitePath('/');
-			}
-
-			if (this.siteComponent?.enableAutoPublish) {
-				this.siteComponent.enableAutoPublish();
-			}
-
 			await new Promise(resolve => setTimeout(resolve, 100));
 
 			if (this.siteComponent?.startPublish) {
 				await this.siteComponent.startPublish();
 			}
-
-			new Notice(this.i18n.t('messages.quick_publish_success'), 3000);
 		} catch (error) {
 			console.error('Publish to web failed:', error);
 			new Notice(this.i18n.t('messages.quick_share_failed', { error: (error as Error).message }), 5000);

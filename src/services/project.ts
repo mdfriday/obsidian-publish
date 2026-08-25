@@ -3,6 +3,12 @@ import type {TFile, TFolder} from 'obsidian';
 import type {ProgressUpdate, PublishProgressUpdate} from '../types/events';
 import {joinPath} from '../utils/common';
 
+/** Share mode baseURL per arch/03-build-contract.md */
+export function computeShareBaseUrl(publicBaseUrl: string, siteId: string): string {
+	const base = (publicBaseUrl || 'https://share.fsky.top').replace(/\/$/, '');
+	return `${base}/s/${siteId}/`;
+}
+
 /**
  * Project Service Manager
  * 
@@ -230,6 +236,115 @@ export class ProjectServiceManager {
 		}
 	}
 
+	// ==================== Cloudflare share baseURL ====================
+
+	private async ensureGuestToken(): Promise<string | null> {
+		let token = this.plugin.settings.cloudflareGuestToken;
+		if (token) return token;
+
+		const foundry = this.plugin.foundryPublishService;
+		if (!foundry) return null;
+
+		const guest = await foundry.guest();
+		if (!guest.success || !guest.token) return null;
+
+		token = guest.token;
+		this.plugin.settings.cloudflareGuestToken = token;
+		await this.plugin.saveSettings();
+		return token;
+	}
+
+	/**
+	 * Bind remote project and persist share-mode baseURL before build.
+	 * arch/03: share baseURL = https://share…/s/{siteId}/
+	 */
+	async ensureShareBaseUrl(
+		projectName: string,
+	): Promise<{ siteId: string; baseURL: string } | { error: string }> {
+		const foundry = this.plugin.foundryPublishService;
+		if (!foundry) {
+			return { error: 'Publish service not initialized' };
+		}
+
+		const token = await this.ensureGuestToken();
+		if (!token) {
+			return { error: 'Failed to create guest session' };
+		}
+
+		const publicBaseUrl =
+			this.plugin.settings.cloudflarePublicBaseUrl || 'https://share.fsky.top';
+
+		const binding = await foundry.ensureCloudflareBinding({
+			workspacePath: this.plugin.absWorkspacePath,
+			projectName,
+			authToken: token,
+			hostingMode: 'share',
+			apiBaseUrl: this.plugin.settings.cloudflareApiBaseUrl,
+			publicBaseUrl,
+		});
+
+		if (!binding.success) {
+			return { error: binding.error || 'Failed to bind Cloudflare project' };
+		}
+		if (!binding.siteId) {
+			return { error: 'Cloudflare project has no siteId yet' };
+		}
+
+		const baseURL = computeShareBaseUrl(publicBaseUrl, binding.siteId);
+		const saved = await this.saveConfig(projectName, 'baseURL', baseURL);
+		if (!saved) {
+			console.warn('[ProjectServiceManager] Failed to persist baseURL');
+		}
+
+		return { siteId: binding.siteId, baseURL };
+	}
+
+	/**
+	 * One-shot Cloudflare publish: bind → set baseURL → build → upload.
+	 */
+	async buildAndPublishCloudflare(
+		projectName: string,
+		options: {
+			onProgress?: (progress: ProgressUpdate | PublishProgressUpdate) => void;
+		} = {},
+	): Promise<PublishResult & { baseURL?: string; siteId?: string }> {
+		const { onProgress } = options;
+
+		const ensured = await this.ensureShareBaseUrl(projectName);
+		if ('error' in ensured) {
+			return { success: false, error: ensured.error };
+		}
+
+		onProgress?.({
+			phase: 'building',
+			percentage: 0,
+			message: 'Building site…',
+		} as ProgressUpdate);
+
+		const buildResult = await this.build(projectName, (progress) => {
+			onProgress?.(progress);
+		});
+
+		if (!buildResult.success) {
+			return { success: false, error: buildResult.error || 'Build failed' };
+		}
+
+		const publishResult = await this.publish(projectName, {
+			method: 'cloudflare',
+			onProgress: (progress) => onProgress?.(progress),
+		});
+
+		if (!publishResult.success) {
+			return publishResult;
+		}
+
+		return {
+			...publishResult,
+			baseURL: ensured.baseURL,
+			siteId: ensured.siteId,
+		};
+	}
+
 	// ==================== 构建和预览 ====================
 
 	/**
@@ -284,6 +399,13 @@ export class ProjectServiceManager {
 		const useCloudflare = !!publishConfig;
 		const servePublishConfig = undefined;
 
+		if (useCloudflare) {
+			const ensured = await this.ensureShareBaseUrl(projectName);
+			if ('error' in ensured) {
+				return { success: false, error: ensured.error };
+			}
+		}
+
 		const result = await this.plugin.foundryServeService.startServer(
 			{
 				workspacePath: this.plugin.absWorkspacePath,
@@ -296,6 +418,8 @@ export class ProjectServiceManager {
 		);
 
 			if (result.success && result.data) {
+				let cloudflarePublishUrl: string | undefined;
+
 				if (useCloudflare) {
 					const publishResult = await this.publish(projectName, {
 						method: 'cloudflare',
@@ -317,6 +441,8 @@ export class ProjectServiceManager {
 						};
 					}
 
+					cloudflarePublishUrl = publishResult.url;
+
 					onProgress?.({
 						phase: 'publish-success',
 						percentage: 100,
@@ -335,7 +461,8 @@ export class ProjectServiceManager {
 					success: true,
 					url: result.data.url,
 					port: result.data.port,
-					path: projectInfo?.path // Add preview directory path
+					path: projectInfo?.path,
+					...(cloudflarePublishUrl ? { publishUrl: cloudflarePublishUrl } : {}),
 				};
 			}
 
@@ -493,7 +620,8 @@ export interface PreviewResult {
 	error?: string;
 	url?: string;
 	port?: number;
-	path?: string; // Preview directory absolute path
+	path?: string;
+	publishUrl?: string;
 }
 
 export interface PublishResult {

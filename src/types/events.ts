@@ -9,6 +9,7 @@ export type SiteEventType =
 	| 'buildRequested'       // 请求构建
 	| 'previewRequested'     // 请求预览
 	| 'publishRequested'     // 请求发布
+	| 'buildAndPublishRequested' // 构建并发布（Cloudflare 单次发布）
 	| 'testConnection'       // 测试连接
 	| 'stopPreview';         // 停止预览
 
@@ -40,6 +41,10 @@ export interface SiteEventData {
 		projectName: string;
 		method: string;
 		config: any;
+	};
+	buildAndPublishRequested: {
+		projectName: string;
+		renderer?: any;
 	};
 	testConnection: {
 		projectName: string;

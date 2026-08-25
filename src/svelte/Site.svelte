@@ -236,7 +236,7 @@
 				actualValue = {
 					googleAnalytics: { id: value }
 				};
-			} else if (key === 'params.disqusShortname' || key === 'params.password' || key === 'params.autoPublish') {
+			} else if (key === 'params.disqusShortname' || key === 'params.password' || key === 'params.autoPublish' || key === 'params.lastPublishUrl') {
 				// For params, we need to merge with existing params
 				const existingConfig = await plugin.getFoundryProjectConfigMap(plugin.currentProjectName);
 				const params = existingConfig['params'] || {};
@@ -247,6 +247,8 @@
 					params.password = value;
 				} else if (key === 'params.autoPublish') {
 					params.autoPublish = value;
+				} else if (key === 'params.lastPublishUrl') {
+					params.lastPublishUrl = value;
 				}
 				
 				actualKey = 'params';
@@ -359,6 +361,10 @@
 		if (state.config.params?.autoPublish !== undefined) {
 			autoPublishEnabled = state.config.params.autoPublish;
 		}
+		if (state.config.params?.lastPublishUrl) {
+			publishUrl = state.config.params.lastPublishUrl;
+			publishSuccess = true;
+		}
 
 			// 5. Load language configuration
 			if (state.config.languages && state.config.defaultContentLanguage) {
@@ -399,7 +405,24 @@
 				break;
 		}
 
-		// If auto-publish is enabled, sync publish progress with build progress
+		// Publish progress from preview+publish (realtime) or build+publish pipeline
+		if (progress.phase === 'publishing' || progress.phase === 'publish-success') {
+			if (progress.phase === 'publishing') {
+				isPublishing = true;
+				publishSuccess = false;
+				publishProgress = progress.percentage ?? publishProgress;
+			} else if (progress.phase === 'publish-success') {
+				isPublishing = false;
+				publishSuccess = true;
+				publishProgress = 100;
+				if (progress.data?.publishUrl) {
+					publishUrl = buildPublishUrl(progress.data.publishUrl);
+					persistLastPublishUrl(publishUrl);
+				}
+			}
+		}
+
+		// Legacy: auto-publish sync via overallPercentage
 		if (progress.overallPercentage !== undefined && autoPublishEnabled) {
 			publishProgress = progress.overallPercentage;
 
@@ -427,6 +450,9 @@
 	 * Update publish progress
 	 */
 	export function updatePublishProgress(progress: PublishProgressUpdate) {
+		isPublishing = true;
+		publishSuccess = false;
+
 		// Map Foundry service phases to progress percentage
 		// Phases: 'scanning' | 'uploading' | 'deploying' | 'complete'
 		switch (progress.phase) {
@@ -501,7 +527,18 @@
 	}
 
 	function buildPublishUrl(resultUrl: string): string {
-		return resultUrl || '';
+		if (!resultUrl) return '';
+		if (/^https?:\/\//i.test(resultUrl)) return resultUrl;
+		const publicBase =
+			plugin.settings.cloudflarePublicBaseUrl || 'https://share.fsky.top';
+		const base = publicBase.replace(/\/$/, '');
+		const path = resultUrl.startsWith('/') ? resultUrl : `/${resultUrl}`;
+		return `${base}${path}`;
+	}
+
+	async function persistLastPublishUrl(url: string) {
+		if (!url || !plugin.currentProjectName) return;
+		await saveFoundryConfig('params.lastPublishUrl', url);
 	}
 
 	/**
@@ -512,8 +549,14 @@
 		isPublishing = false;
 		publishSuccess = true;
 
-		// Build publish URL based on publish method
 		publishUrl = buildPublishUrl(result.url || '');
+		if (result.baseURL) {
+			sitePath = result.baseURL;
+		}
+		if (publishUrl) {
+			persistLastPublishUrl(publishUrl);
+			new Notice(t('messages.site_published_successfully'), 5000);
+		}
 	}
 
 	/**
@@ -1390,51 +1433,36 @@
 	}
 
 	async function startPublish() {
-		// If auto-publish is enabled, use autoPublish instead
 		if (autoPublishEnabled) {
 			await autoPublish();
 			return;
 		}
 
-		// If no preview exists, generate it first
-		if (!hasPreview) {
-			await startPreview();
-			
-			// Wait for preview to complete before publishing
-			// The preview callback (onPreviewStarted) will set hasPreview to true
-			const maxWaitTime = 300000; // 5 minutes max
-			const checkInterval = 500; // Check every 500ms
-			let waitedTime = 0;
-			
-			while (!hasPreview && isBuilding && waitedTime < maxWaitTime) {
-				await new Promise(resolve => setTimeout(resolve, checkInterval));
-				waitedTime += checkInterval;
-			}
-			
-			if (!hasPreview) {
-				console.error("Preview generation failed or timed out after waiting for 5 minutes.");
-				return;
-			}
+		if (currentContents.length === 0) {
+			new Notice(t('messages.no_folder_or_file_selected'), 3000);
+			return;
 		}
 
-		isPublishing = true;
-		publishProgress = 0;
-		publishSuccess = false;
+		if (!plugin.currentProjectName) {
+			new Notice('No project selected. Please right-click a folder first.', 3000);
+			return;
+		}
+
+		resetPublishState();
 
 		try {
-			const projectName = plugin.currentProjectName!;
+			const themeInfo = await themeApiService.getThemeById(selectedThemeId, plugin);
+			hasOBTag = themeInfo?.tags?.some(tag =>
+				tag.toLowerCase() === 'obsidian'
+			) || false;
+			const customRenderer = await createRendererBasedOnTheme();
 
 			if (plugin.handleSiteEvent) {
-				await plugin.handleSiteEvent('publishRequested', {
-					projectName,
-					method: 'cloudflare',
-					config: undefined
+				await plugin.handleSiteEvent('buildAndPublishRequested', {
+					projectName: plugin.currentProjectName,
+					renderer: hasOBTag ? customRenderer : undefined,
 				});
-				
-				// Note: Progress updates and completion will be handled by callbacks
-				// (updatePublishProgress, onPublishComplete, onPublishError)
 			}
-
 		} catch (error) {
 			console.error('Publish failed:', error);
 			new Notice(t('messages.publish_failed', { error: error.message }), 5000);
@@ -1442,7 +1470,6 @@
 			publishProgress = 0;
 			publishSuccess = false;
 		}
-		// Note: isPublishing will be set to false by onPublishComplete/onPublishError callbacks
 	}
 
 	// Handle auto-publish toggle change (only save when user manually toggles)
@@ -1882,7 +1909,7 @@
 					bind:checked={autoPublishEnabled}
 					on:change={handleAutoPublishToggle}
 				/>
-				<span class="toggle-label">{t('ui.auto_publish') || 'Auto Publish'}</span>
+				<span class="toggle-label">{t('ui.realtime_publish') || 'Realtime publish'}</span>
 			</label>
 		</div>
 	</div>
@@ -2091,14 +2118,15 @@
 									<label class="section-label" for="site-path">{t('ui.site_path')}</label>
 									<input
 										type="text"
-										class="form-input"
-										bind:value={sitePath}
-										on:blur={handleSitePathChange}
-										placeholder={t('ui.site_path_placeholder')}
-										title={t('ui.site_path_hint')}
+										id="site-path"
+										class="form-input form-input-readonly"
+										value={sitePath}
+										readonly
+										placeholder={t('ui.site_path_share_placeholder')}
+										title={t('ui.site_path_share_hint')}
 									/>
 									<div class="field-hint">
-										{t('ui.site_path_hint')}
+										{t('ui.site_path_share_hint')}
 									</div>
 								</div>
 
@@ -2567,6 +2595,12 @@
 	.form-input:focus {
 		outline: none;
 		border-color: var(--interactive-accent);
+	}
+
+	.form-input-readonly {
+		opacity: 0.85;
+		cursor: default;
+		background: var(--background-secondary);
 	}
 
 	.form-select {
