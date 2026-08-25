@@ -1,0 +1,95 @@
+/* Project Management Modal Styles */
+
+/* Project suggestion item */
+.friday-project-suggestion {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 12px;
+	cursor: pointer;
+	border-radius: 4px;
+	transition: background-color 0.1s ease;
+}
+
+.friday-project-suggestion:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.friday-project-suggestion.is-selected {
+	background-color: var(--background-modifier-active-hover);
+}
+
+/* Project name */
+.friday-project-name {
+	flex: 1;
+	font-size: 14px;
+	color: var(--text-normal);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Delete button */
+.friday-project-delete {
+	flex-shrink: 0;
+	width: 24px;
+	height: 24px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 4px;
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: all 0.1s ease;
+	margin-left: 12px;
+}
+
+.friday-project-delete:hover {
+	background-color: var(--background-modifier-error);
+	color: var(--text-error);
+}
+
+.friday-project-delete svg {
+	width: 16px;
+	height: 16px;
+}
+
+/* Delete confirmation modal */
+.modal-button-container {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-end;
+	margin-top: 16px;
+}
+
+.modal-button-container button {
+	padding: 6px 16px;
+	border-radius: 4px;
+	border: none;
+	cursor: pointer;
+	font-size: 14px;
+	transition: all 0.1s ease;
+}
+
+.modal-button-container button:not(.mod-warning) {
+	background-color: var(--interactive-normal);
+	color: var(--text-normal);
+}
+
+.modal-button-container button:not(.mod-warning):hover {
+	background-color: var(--interactive-hover);
+}
+
+.modal-button-container button.mod-warning {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.modal-button-container button.mod-warning:hover {
+	background-color: var(--interactive-accent-hover);
+}
+
+.mod-warning {
+	color: var(--text-error);
+	font-weight: 500;
+}

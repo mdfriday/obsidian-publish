@@ -1,0 +1,142 @@
+/* Publish Settings Styles */
+
+/* Publish Method Containers */
+.mdfriday-free-container,
+.mdfriday-share-container,
+.mdfriday-settings-container,
+.mdfriday-custom-domain-container,
+.mdfriday-enterprise-container,
+.netlify-settings-container,
+.ftp-settings-container {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background-color: var(--background-secondary);
+}
+
+.mdfriday-free-container h3,
+.mdfriday-share-container h3,
+.mdfriday-settings-container h3,
+.mdfriday-custom-domain-container h3,
+.mdfriday-enterprise-container h3,
+.netlify-settings-container h3,
+.ftp-settings-container h3 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  color: var(--text-normal);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* FTP Test Connection Button Styles */
+.ftp-test-success {
+  background-color: var(--color-green) !important;
+  color: white !important;
+  border-color: var(--color-green) !important;
+}
+
+.ftp-test-error {
+  background-color: var(--color-red) !important;
+  color: white !important;
+  border-color: var(--color-red) !important;
+}
+
+.ftp-test-result {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.4;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  clear: both;
+}
+
+.ftp-test-result-success {
+  background-color: rgba(var(--color-green-rgb), 0.1);
+  color: var(--color-green);
+  border: 1px solid rgba(var(--color-green-rgb), 0.3);
+}
+
+.ftp-test-result-error {
+  background-color: rgba(var(--color-red-rgb), 0.1);
+  color: var(--color-red);
+  border: 1px solid rgba(var(--color-red-rgb), 0.3);
+}
+
+/* Subdomain status feedback (similar to FTP test result) */
+.subdomain-status {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.4;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  clear: both;
+}
+
+.subdomain-status.available {
+  background-color: rgba(var(--color-green-rgb), 0.1);
+  color: var(--color-green);
+  border: 1px solid rgba(var(--color-green-rgb), 0.3);
+}
+
+.subdomain-status.unavailable {
+  background-color: rgba(var(--color-blue-rgb), 0.1);
+  color: var(--color-blue);
+  border: 1px solid rgba(var(--color-blue-rgb), 0.3);
+}
+
+.subdomain-status.error {
+  background-color: rgba(var(--color-red-rgb), 0.1);
+  color: var(--color-red);
+  border: 1px solid rgba(var(--color-red-rgb), 0.3);
+}
+
+/* ───────────────────────────────────────────────
+   AI Provider Settings
+   ─────────────────────────────────────────────── */
+
+.friday-ai-provider-config {
+  margin-top: 4px;
+}
+
+.friday-settings-card {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background-color: var(--background-secondary);
+}
+
+.friday-card-title {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.friday-embedding-title {
+  margin-top: 20px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.friday-embedding-config {
+  margin-top: 4px;
+}
+
+.friday-required-badge {
+  color: var(--color-red);
+  margin-left: 2px;
+  font-weight: bold;
+}
