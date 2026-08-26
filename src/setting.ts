@@ -1,4 +1,4 @@
-import {App, PluginSettingTab, Setting, Platform} from 'obsidian';
+import {App, PluginSettingTab, Setting, Platform, Notice} from 'obsidian';
 import type FridayPlugin from './main';
 
 export class FridaySettingTab extends PluginSettingTab {
@@ -21,15 +21,101 @@ export class FridaySettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Publish to Cloudflare')
 			.setDesc(
-				'No account required. The plugin automatically creates a guest session, publishes your site, and returns a share link. Sign in later to claim your sites.',
+				'Guest publish needs no account. Sign in with Google (Free) via mdfriday.com Account to claim your sites permanently.',
 			);
 
-		const token = this.plugin.settings.cloudflareGuestToken;
+		const userToken = this.plugin.settings.cloudflareUserToken;
+		const guestToken = this.plugin.settings.cloudflareGuestToken;
+
+		new Setting(containerEl)
+			.setName('Account (Free)')
+			.setDesc(
+				userToken
+					? `Signed in (${userToken.slice(0, 12)}…). Publish uses your Free account.`
+					: 'Not signed in — Guest mode until you paste a JWT from Google login.',
+			)
+			.addButton((btn) => {
+				btn.setButtonText('Open Google sign-in');
+				btn.onClick(() => {
+					const base = (
+						this.plugin.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account'
+					).replace(/\/$/, '');
+					window.open(`${base}/`, '_blank');
+					new Notice(
+						'Sign in with Google on the Account page, then paste the token here (or from ?token= in the URL).',
+						8000,
+					);
+				});
+			})
+			.addButton((btn) => {
+				btn.setButtonText(userToken ? 'Sign out' : 'Clear').setWarning();
+				btn.onClick(async () => {
+					if (this.plugin.projectServiceManager) {
+						await this.plugin.projectServiceManager.logoutCloudflareUser();
+					} else {
+						this.plugin.settings.cloudflareUserToken = null;
+						await this.plugin.saveSettings();
+					}
+					this.display();
+				});
+				btn.setDisabled(!userToken);
+			});
+
+		let pendingJwt = '';
+		new Setting(containerEl)
+			.setName('Paste account token')
+			.setDesc(
+				'After Google login, copy the `token` query param from the redirect URL (studio / account callback) and paste here.',
+			)
+			.addText((text) => {
+				text.setPlaceholder('eyJhbGciOi… or full URL with ?token=');
+				text.onChange((value) => {
+					pendingJwt = value;
+				});
+			})
+			.addButton((btn) => {
+				btn.setButtonText('Save & claim guest');
+				btn.setCta();
+				btn.onClick(async () => {
+					const raw = pendingJwt.trim();
+					if (!raw) {
+						new Notice('Paste a token first', 3000);
+						return;
+					}
+					let jwt = raw;
+					try {
+						if (raw.includes('token=')) {
+							const u = new URL(raw.includes('://') ? raw : `https://x.local/?${raw.replace(/^\?/, '')}`);
+							jwt = u.searchParams.get('token') || raw;
+						}
+					} catch {
+						/* use raw */
+					}
+					const mgr = this.plugin.projectServiceManager;
+					if (!mgr) {
+						new Notice('Publish service not ready', 3000);
+						return;
+					}
+					const result = await mgr.loginWithUserToken(jwt);
+					if (!result.success) {
+						new Notice(`Sign-in failed: ${result.error}`, 5000);
+						return;
+					}
+					new Notice(
+						result.plan
+							? `Signed in (${result.plan}). Guest sites claimed if any.`
+							: 'Signed in. Guest sites claimed if any.',
+						5000,
+					);
+					this.display();
+				});
+			});
+
 		new Setting(containerEl)
 			.setName('Guest session')
 			.setDesc(
-				token
-					? `Active (${token.slice(0, 8)}…). Clear to start fresh on this device.`
+				guestToken
+					? `Active (${guestToken.slice(0, 8)}…). Cleared after claim, or clear to start fresh.`
 					: 'Not created yet — will be created on first publish.',
 			)
 			.addButton((btn) => {
@@ -39,7 +125,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 					this.display();
 				});
-				btn.setDisabled(!token);
+				btn.setDisabled(!guestToken);
 			});
 
 		if (Platform.isDesktop) {
@@ -72,15 +158,30 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 
 			new Setting(containerEl)
+				.setName('Account / OAuth redirect hint')
+				.setDesc('Studio or account host that receives ?token= after Google login')
+				.addText((text) => {
+					text
+						.setValue(
+							this.plugin.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account',
+						)
+						.onChange(async (value) => {
+							this.plugin.settings.cloudflareAccountBaseUrl =
+								value.trim() || 'https://mdfriday.com/account';
+							await this.plugin.saveSettings();
+						});
+				});
+
+			new Setting(containerEl)
 				.setName('Theme download server')
 				.setDesc('Region for downloading theme samples')
 				.addDropdown((dropdown) => {
 					dropdown
 						.addOption('global', this.plugin.i18n.t('settings.download_server_global'))
 						.addOption('east', this.plugin.i18n.t('settings.download_server_east'))
-						.setValue(this.plugin.settings.downloadServer || 'global')
-						.onChange(async (value) => {
-							this.plugin.settings.downloadServer = value as 'global' | 'east';
+						.setValue(this.plugin.settings.downloadServer)
+						.onChange(async (value: 'global' | 'east') => {
+							this.plugin.settings.downloadServer = value;
 							await this.plugin.saveSettings();
 						});
 				});

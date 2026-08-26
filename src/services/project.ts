@@ -236,7 +236,20 @@ export class ProjectServiceManager {
 		}
 	}
 
-	// ==================== Cloudflare share baseURL ====================
+	// ==================== Cloudflare auth + share baseURL ====================
+
+	/**
+	 * Prefer Free user JWT; fall back to guest (create if needed).
+	 */
+	async resolveAuthToken(): Promise<{ token: string; kind: 'user' | 'guest' } | null> {
+		const userToken = this.plugin.settings.cloudflareUserToken;
+		if (userToken) {
+			return { token: userToken, kind: 'user' };
+		}
+		const guestToken = await this.ensureGuestToken();
+		if (!guestToken) return null;
+		return { token: guestToken, kind: 'guest' };
+	}
 
 	private async ensureGuestToken(): Promise<string | null> {
 		let token = this.plugin.settings.cloudflareGuestToken;
@@ -255,6 +268,50 @@ export class ProjectServiceManager {
 	}
 
 	/**
+	 * Free: install user JWT, optionally claim prior guest sites (idempotent).
+	 */
+	async loginWithUserToken(userJwt: string): Promise<{ success: boolean; error?: string; plan?: string }> {
+		const foundry = this.plugin.foundryPublishService;
+		if (!foundry) {
+			return { success: false, error: 'Publish service not initialized' };
+		}
+		const trimmed = userJwt.trim();
+		if (!trimmed) {
+			return { success: false, error: 'Empty token' };
+		}
+
+		const login = await foundry.loginWithToken(trimmed);
+		if (!login.success) {
+			return { success: false, error: login.error || 'Login failed' };
+		}
+
+		this.plugin.settings.cloudflareUserToken = trimmed;
+		await this.plugin.saveSettings();
+
+		const guestToken = this.plugin.settings.cloudflareGuestToken;
+		if (guestToken) {
+			const claim = await foundry.claim(guestToken);
+			if (!claim.success) {
+				return {
+					success: false,
+					error: claim.error || 'Claim failed',
+					plan: login.plan,
+				};
+			}
+			// Guest sites now owned by user; drop guest token so later publishes use JWT.
+			this.plugin.settings.cloudflareGuestToken = null;
+			await this.plugin.saveSettings();
+		}
+
+		return { success: true, plan: login.plan };
+	}
+
+	async logoutCloudflareUser(): Promise<void> {
+		this.plugin.settings.cloudflareUserToken = null;
+		await this.plugin.saveSettings();
+	}
+
+	/**
 	 * Bind remote project and persist share-mode baseURL before build.
 	 * arch/03: share baseURL = https://share…/s/{siteId}/
 	 */
@@ -266,8 +323,8 @@ export class ProjectServiceManager {
 			return { error: 'Publish service not initialized' };
 		}
 
-		const token = await this.ensureGuestToken();
-		if (!token) {
+		const auth = await this.resolveAuthToken();
+		if (!auth) {
 			return { error: 'Failed to create guest session' };
 		}
 
@@ -277,7 +334,7 @@ export class ProjectServiceManager {
 		const binding = await foundry.ensureCloudflareBinding({
 			workspacePath: this.plugin.absWorkspacePath,
 			projectName,
-			authToken: token,
+			authToken: auth.token,
 			hostingMode: 'share',
 			apiBaseUrl: this.plugin.settings.cloudflareApiBaseUrl,
 			publicBaseUrl,
@@ -495,10 +552,10 @@ export class ProjectServiceManager {
 	// ==================== 发布 ====================
 
 	/**
-	 * 发布项目 — 仅通过 Foundry ObsidianPublishService（guest → bind → R2）。
+	 * 发布项目 — 仅通过 Foundry ObsidianPublishService（auth → bind → R2）。
 	 * 插件不直接请求 Cloudflare API。
 	 *
-	 * Interface 职责（arch/12 §6）：持久化 guest token；调用 foundry.guest / publishCloudflare。
+	 * Interface：持久化 guest / user JWT；调用 foundry.guest / loginWithToken / publishCloudflare。
 	 */
 	async publish(
 		projectName: string,
@@ -515,27 +572,20 @@ export class ProjectServiceManager {
 				return { success: false, error: 'Publish service not initialized' };
 			}
 
-			// Persist guest token at Interface layer (settings). Binding + R2 stay inside Foundry.
-			let token = this.plugin.settings.cloudflareGuestToken;
-			if (!token) {
-				const guest = await foundry.guest();
-				if (!guest.success || !guest.token) {
-					return {
-						success: false,
-						error: guest.error || 'Failed to create guest session',
-					};
-				}
-				token = guest.token;
-				this.plugin.settings.cloudflareGuestToken = token;
-				await this.plugin.saveSettings();
+			const auth = await this.resolveAuthToken();
+			if (!auth) {
+				return {
+					success: false,
+					error: 'Failed to obtain auth token',
+				};
 			}
 
 			const result = await foundry.publishCloudflare(
 				{
 					workspacePath: this.plugin.absWorkspacePath,
 					projectName,
-					authToken: token,
-					guest: false,
+					authToken: auth.token,
+					guest: auth.kind === 'guest',
 					apiBaseUrl: this.plugin.settings.cloudflareApiBaseUrl,
 					publicBaseUrl: this.plugin.settings.cloudflarePublicBaseUrl,
 					hostingMode: 'share',

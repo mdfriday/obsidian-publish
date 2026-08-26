@@ -34,15 +34,21 @@ export const FRIDAY_SERVER_VIEW_TYPE = 'Friday_Service';
 interface FridaySettings {
 	downloadServer: 'global' | 'east';
 	cloudflareGuestToken: string | null;
+	/** User JWT from mdfriday.com Google OAuth (Free+) */
+	cloudflareUserToken: string | null;
 	cloudflareApiBaseUrl: string;
 	cloudflarePublicBaseUrl: string;
+	/** Account site for OAuth / paste-token bridge (default mdfriday.com Studio callback host) */
+	cloudflareAccountBaseUrl: string;
 }
 
 const DEFAULT_SETTINGS: FridaySettings = {
 	downloadServer: 'global',
 	cloudflareGuestToken: null,
+	cloudflareUserToken: null,
 	cloudflareApiBaseUrl: 'https://api.fsky.top',
 	cloudflarePublicBaseUrl: 'https://share.fsky.top',
+	cloudflareAccountBaseUrl: 'https://mdfriday.com/account',
 }
 
 export const FRIDAY_ICON = 'dice-5';
