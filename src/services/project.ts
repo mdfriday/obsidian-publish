@@ -236,78 +236,78 @@ export class ProjectServiceManager {
 		}
 	}
 
-	// ==================== Cloudflare auth + share baseURL ====================
+	// ==================== Cloudflare MDF Key + share baseURL ====================
 
 	/**
-	 * Prefer Free user JWT; fall back to guest (create if needed).
+	 * Ensure we have an MDF_… Key (create guest if needed).
 	 */
-	async resolveAuthToken(): Promise<{ token: string; kind: 'user' | 'guest' } | null> {
-		const userToken = this.plugin.settings.cloudflareUserToken;
-		if (userToken) {
-			return { token: userToken, kind: 'user' };
+	async ensureMdfKey(): Promise<string | null> {
+		await this.plugin.applyCloudflareEnv({ persist: true });
+
+		if (this.plugin.settings.mdfKey) {
+			return this.plugin.settings.mdfKey;
 		}
-		const guestToken = await this.ensureGuestToken();
-		if (!guestToken) return null;
-		return { token: guestToken, kind: 'guest' };
-	}
-
-	private async ensureGuestToken(): Promise<string | null> {
-		let token = this.plugin.settings.cloudflareGuestToken;
-		if (token) return token;
-
 		const foundry = this.plugin.foundryPublishService;
 		if (!foundry) return null;
 
 		const guest = await foundry.guest();
-		if (!guest.success || !guest.token) return null;
+		const key = guest.key || guest.token;
+		if (!guest.success || !key) return null;
 
-		token = guest.token;
-		this.plugin.settings.cloudflareGuestToken = token;
+		this.plugin.settings.mdfKey = key;
+		this.plugin.settings.mdfKeyKind = 'guest';
+		this.plugin.settings.mdfKeyPlan = 'guest';
 		await this.plugin.saveSettings();
-		return token;
+		foundry.setKey(key, 'guest');
+		return key;
 	}
 
 	/**
-	 * Free: install user JWT, optionally claim prior guest sites (idempotent).
+	 * Prefer persisted MDF Key (guest or user after claim).
 	 */
-	async loginWithUserToken(userJwt: string): Promise<{ success: boolean; error?: string; plan?: string }> {
+	async resolveAuthToken(): Promise<{ token: string; kind: 'user' | 'guest' } | null> {
+		const key = await this.ensureMdfKey();
+		if (!key) return null;
+		const kind = this.plugin.settings.mdfKeyKind === 'user' ? 'user' : 'guest';
+		return { token: key, kind };
+	}
+
+	async refreshCloudflareAccount(): Promise<{
+		success: boolean;
+		kind?: string;
+		plan?: string;
+		error?: string;
+	}> {
 		const foundry = this.plugin.foundryPublishService;
 		if (!foundry) {
 			return { success: false, error: 'Publish service not initialized' };
 		}
-		const trimmed = userJwt.trim();
-		if (!trimmed) {
-			return { success: false, error: 'Empty token' };
+		const key = this.plugin.settings.mdfKey;
+		if (!key) {
+			return { success: false, error: 'No MDF Key' };
 		}
-
-		const login = await foundry.loginWithToken(trimmed);
-		if (!login.success) {
-			return { success: false, error: login.error || 'Login failed' };
+		foundry.setKey(key);
+		const account = await foundry.getAccount();
+		if (!account.success) {
+			return { success: false, error: account.error || 'getAccount failed' };
 		}
-
-		this.plugin.settings.cloudflareUserToken = trimmed;
+		this.plugin.settings.mdfKeyKind = account.kind ?? null;
+		this.plugin.settings.mdfKeyPlan = account.plan ?? null;
 		await this.plugin.saveSettings();
+		return { success: true, kind: account.kind, plan: account.plan };
+	}
 
-		const guestToken = this.plugin.settings.cloudflareGuestToken;
-		if (guestToken) {
-			const claim = await foundry.claim(guestToken);
-			if (!claim.success) {
-				return {
-					success: false,
-					error: claim.error || 'Claim failed',
-					plan: login.plan,
-				};
-			}
-			// Guest sites now owned by user; drop guest token so later publishes use JWT.
-			this.plugin.settings.cloudflareGuestToken = null;
-			await this.plugin.saveSettings();
-		}
-
-		return { success: true, plan: login.plan };
+	/** @deprecated JWT paste path removed — Account claim is on mdfriday.com */
+	async loginWithUserToken(_userJwt: string): Promise<{ success: boolean; error?: string; plan?: string }> {
+		return {
+			success: false,
+			error: 'Use Account login (opens mdfriday.com). Plugin only stores MDF Key.',
+		};
 	}
 
 	async logoutCloudflareUser(): Promise<void> {
-		this.plugin.settings.cloudflareUserToken = null;
+		this.plugin.settings.mdfKeyKind = this.plugin.settings.mdfKey ? 'guest' : null;
+		this.plugin.settings.mdfKeyPlan = this.plugin.settings.mdfKey ? 'guest' : null;
 		await this.plugin.saveSettings();
 	}
 

@@ -1,6 +1,9 @@
 import {App, PluginSettingTab, Setting, Platform, Notice} from 'obsidian';
 import type FridayPlugin from './main';
 
+/** Obsidian official protocol: obsidian://mdfriday-publish?... */
+export const OBSIDIAN_PROTOCOL_ACTION = 'mdfriday-publish';
+
 export class FridaySettingTab extends PluginSettingTab {
 	plugin: FridayPlugin;
 
@@ -21,154 +24,120 @@ export class FridaySettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Publish to Cloudflare')
 			.setDesc(
-				'Guest publish needs no account. Sign in with Google (Free) via mdfriday.com Account to claim your sites permanently.',
+				'Guest needs no account. Sign in via mdfriday.com Account to claim sites (same MDF Key). Content expires next UTC midnight until claimed.',
 			);
 
-		const userToken = this.plugin.settings.cloudflareUserToken;
-		const guestToken = this.plugin.settings.cloudflareGuestToken;
+		const mdfKey = this.plugin.settings.mdfKey;
+		const kind = this.plugin.settings.mdfKeyKind;
+
+		new Setting(containerEl)
+			.setName('Credential (MDF Key)')
+			.setDesc(
+				mdfKey
+					? `Key ${mdfKey.slice(0, 12)}… — kind shown beside: ${kind ?? 'unknown'}. Key string has no type prefix.`
+					: 'Not created yet — issued on first publish (guest).',
+			)
+			.addExtraButton((btn) => {
+				btn.setIcon('copy');
+				btn.setTooltip('Copy Key');
+				btn.setDisabled(!mdfKey);
+				btn.onClick(async () => {
+					if (!mdfKey) return;
+					await navigator.clipboard.writeText(mdfKey);
+					new Notice('MDF Key copied', 2000);
+				});
+			})
+			.addButton((btn) => {
+				btn.setButtonText(kind === 'user' ? 'User' : kind === 'guest' ? 'Guest' : '—');
+				btn.setDisabled(true);
+			})
+			.addButton((btn) => {
+				btn.setButtonText('Clear Key').setWarning();
+				btn.setDisabled(!mdfKey);
+				btn.onClick(async () => {
+					this.plugin.settings.mdfKey = null;
+					this.plugin.settings.mdfKeyKind = null;
+					this.plugin.settings.mdfKeyPlan = null;
+					await this.plugin.saveSettings();
+					this.display();
+				});
+			});
 
 		new Setting(containerEl)
 			.setName('Account (Free)')
 			.setDesc(
-				userToken
-					? `Signed in (${userToken.slice(0, 12)}…). Publish uses your Free account.`
-					: 'Not signed in — Guest mode until you paste a JWT from Google login.',
+				kind === 'user'
+					? `Signed in as Free/Paid (plan: ${this.plugin.settings.mdfKeyPlan ?? '—'}).`
+					: 'Opens mdfriday.com Account with your Key for Google login + claim. Plugin updates via deep link.',
 			)
 			.addButton((btn) => {
-				btn.setButtonText('Open Google sign-in');
-				btn.onClick(() => {
-					const base = (
-						this.plugin.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account'
-					).replace(/\/$/, '');
-					window.open(`${base}/`, '_blank');
-					new Notice(
-						'Sign in with Google on the Account page, then paste the token here (or from ?token= in the URL).',
-						8000,
-					);
-				});
-			})
-			.addButton((btn) => {
-				btn.setButtonText(userToken ? 'Sign out' : 'Clear').setWarning();
-				btn.onClick(async () => {
-					if (this.plugin.projectServiceManager) {
-						await this.plugin.projectServiceManager.logoutCloudflareUser();
-					} else {
-						this.plugin.settings.cloudflareUserToken = null;
-						await this.plugin.saveSettings();
-					}
-					this.display();
-				});
-				btn.setDisabled(!userToken);
-			});
-
-		let pendingJwt = '';
-		new Setting(containerEl)
-			.setName('Paste account token')
-			.setDesc(
-				'After Google login, copy the `token` query param from the redirect URL (studio / account callback) and paste here.',
-			)
-			.addText((text) => {
-				text.setPlaceholder('eyJhbGciOi… or full URL with ?token=');
-				text.onChange((value) => {
-					pendingJwt = value;
-				});
-			})
-			.addButton((btn) => {
-				btn.setButtonText('Save & claim guest');
+				btn.setButtonText('Open Account login');
 				btn.setCta();
 				btn.onClick(async () => {
-					const raw = pendingJwt.trim();
-					if (!raw) {
-						new Notice('Paste a token first', 3000);
-						return;
-					}
-					let jwt = raw;
-					try {
-						if (raw.includes('token=')) {
-							const u = new URL(raw.includes('://') ? raw : `https://x.local/?${raw.replace(/^\?/, '')}`);
-							jwt = u.searchParams.get('token') || raw;
-						}
-					} catch {
-						/* use raw */
-					}
 					const mgr = this.plugin.projectServiceManager;
 					if (!mgr) {
 						new Notice('Publish service not ready', 3000);
 						return;
 					}
-					const result = await mgr.loginWithUserToken(jwt);
-					if (!result.success) {
-						new Notice(`Sign-in failed: ${result.error}`, 5000);
+					const key = await mgr.ensureMdfKey();
+					if (!key) {
+						new Notice('Could not create guest Key', 3000);
 						return;
 					}
+					const accountBase = (
+						this.plugin.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account'
+					).replace(/\/$/, '');
+					const url = `${accountBase}/?key=${encodeURIComponent(key)}`;
+					window.open(url, '_blank');
 					new Notice(
-						result.plan
-							? `Signed in (${result.plan}). Guest sites claimed if any.`
-							: 'Signed in. Guest sites claimed if any.',
-						5000,
+						'Complete Google sign-in on Account. Obsidian will refresh when deep link returns.',
+						6000,
 					);
-					this.display();
 				});
-			});
-
-		new Setting(containerEl)
-			.setName('Guest session')
-			.setDesc(
-				guestToken
-					? `Active (${guestToken.slice(0, 8)}…). Cleared after claim, or clear to start fresh.`
-					: 'Not created yet — will be created on first publish.',
-			)
+			})
 			.addButton((btn) => {
-				btn.setButtonText('Clear guest session').setWarning();
+				btn.setButtonText('Refresh status');
 				btn.onClick(async () => {
-					this.plugin.settings.cloudflareGuestToken = null;
-					await this.plugin.saveSettings();
+					const mgr = this.plugin.projectServiceManager;
+					if (!mgr) return;
+					const r = await mgr.refreshCloudflareAccount();
+					if (!r.success) {
+						new Notice(r.error || 'Refresh failed', 4000);
+						return;
+					}
+					new Notice(`Account: ${r.kind} / ${r.plan}`, 3000);
 					this.display();
 				});
-				btn.setDisabled(!guestToken);
 			});
 
 		if (Platform.isDesktop) {
 			containerEl.createEl('h3', {text: 'Advanced', cls: 'friday-section-title'});
 
+			const env = this.plugin.settings.cloudflareEnv || 'auto';
+			const resolved =
+				this.plugin.settings.cloudflareResolvedEnv ||
+				(env === 'auto' ? '…' : env);
 			new Setting(containerEl)
-				.setName('API base URL')
-				.setDesc('Control plane (default https://api.fsky.top)')
-				.addText((text) => {
-					text
-						.setValue(this.plugin.settings.cloudflareApiBaseUrl || 'https://api.fsky.top')
-						.onChange(async (value) => {
-							this.plugin.settings.cloudflareApiBaseUrl =
-								value.trim() || 'https://api.fsky.top';
-							await this.plugin.saveSettings();
-						});
-				});
-
-			new Setting(containerEl)
-				.setName('Share base URL')
-				.setDesc('Public share host (default https://share.fsky.top)')
-				.addText((text) => {
-					text
-						.setValue(this.plugin.settings.cloudflarePublicBaseUrl || 'https://share.fsky.top')
-						.onChange(async (value) => {
-							this.plugin.settings.cloudflarePublicBaseUrl =
-								value.trim() || 'https://share.fsky.top';
-							await this.plugin.saveSettings();
-						});
-				});
-
-			new Setting(containerEl)
-				.setName('Account / OAuth redirect hint')
-				.setDesc('Studio or account host that receives ?token= after Google login')
-				.addText((text) => {
-					text
-						.setValue(
-							this.plugin.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account',
-						)
-						.onChange(async (value) => {
-							this.plugin.settings.cloudflareAccountBaseUrl =
-								value.trim() || 'https://mdfriday.com/account';
-							await this.plugin.saveSettings();
+				.setName('Cloudflare environment')
+				.setDesc(
+					`One switch for API / Share / Account. Auto = use local if :8787 is up, else staging. Now: ${resolved}. ` +
+						`API ${this.plugin.settings.cloudflareApiBaseUrl} · Account ${this.plugin.settings.cloudflareAccountBaseUrl}`,
+				)
+				.addDropdown((dropdown) => {
+					dropdown
+						.addOption('auto', 'Auto (local if running)')
+						.addOption('local', 'Local (127.0.0.1)')
+						.addOption('staging', 'Staging (fsky.top)')
+						.addOption('production', 'Production')
+						.setValue(env)
+						.onChange(async (value: string) => {
+							this.plugin.settings.cloudflareEnv = value as
+								| 'auto'
+								| 'local'
+								| 'staging'
+								| 'production';
+							await this.plugin.applyCloudflareEnv({ persist: true, noticeOnSwitch: true });
+							this.display();
 						});
 				});
 
@@ -180,8 +149,8 @@ export class FridaySettingTab extends PluginSettingTab {
 						.addOption('global', this.plugin.i18n.t('settings.download_server_global'))
 						.addOption('east', this.plugin.i18n.t('settings.download_server_east'))
 						.setValue(this.plugin.settings.downloadServer)
-						.onChange(async (value: 'global' | 'east') => {
-							this.plugin.settings.downloadServer = value;
+						.onChange(async (value: string) => {
+							this.plugin.settings.downloadServer = value as 'global' | 'east';
 							await this.plugin.saveSettings();
 						});
 				});

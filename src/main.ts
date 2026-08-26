@@ -21,6 +21,12 @@ import type {ProjectState, SiteEventData, SiteEventType} from './types/events';
 import {normalizePublishMethod} from './types/publish';
 import {getDefaultTheme, shouldUseInternalRenderer} from './utils/theme';
 import {joinPath, joinVaultPath} from './utils/common';
+import {
+	type CloudflareEnvMode,
+	type CloudflareEnvResolved,
+	endpointsForEnv,
+	resolveCloudflareEnv,
+} from './cloudflare-env';
 
 // PC-only module types (dynamically imported)
 import type {Hugoverse} from "./hugoverse";
@@ -33,19 +39,37 @@ export const FRIDAY_SERVER_VIEW_TYPE = 'Friday_Service';
 
 interface FridaySettings {
 	downloadServer: 'global' | 'east';
-	cloudflareGuestToken: string | null;
-	/** User JWT from mdfriday.com Google OAuth (Free+) */
-	cloudflareUserToken: string | null;
+	/** Unified MDF_… Key (guest or user). Kind is not encoded in the string. */
+	mdfKey: string | null;
+	/** Cached kind from GET /v1/account — display only */
+	mdfKeyKind: 'guest' | 'user' | null;
+	/** Cached plan from GET /v1/account */
+	mdfKeyPlan: string | null;
+	/** @deprecated migrated to mdfKey */
+	cloudflareGuestToken?: string | null;
+	/** @deprecated migrated away — JWT not stored in plugin */
+	cloudflareUserToken?: string | null;
+	/**
+	 * Single env switch. Endpoints are derived from presets (see cloudflare-env.ts).
+	 * `auto` = probe local API on apply; if up use local, else staging.
+	 */
+	cloudflareEnv: CloudflareEnvMode;
+	/** Last resolved env (after auto probe) — used to clear Key on switch */
+	cloudflareResolvedEnv: CloudflareEnvResolved | null;
+	/** Derived — do not edit by hand; refreshed by applyCloudflareEnv() */
 	cloudflareApiBaseUrl: string;
 	cloudflarePublicBaseUrl: string;
-	/** Account site for OAuth / paste-token bridge (default mdfriday.com Studio callback host) */
+	/** Account site for OAuth / claim (?key=) */
 	cloudflareAccountBaseUrl: string;
 }
 
 const DEFAULT_SETTINGS: FridaySettings = {
 	downloadServer: 'global',
-	cloudflareGuestToken: null,
-	cloudflareUserToken: null,
+	mdfKey: null,
+	mdfKeyKind: null,
+	mdfKeyPlan: null,
+	cloudflareEnv: 'auto',
+	cloudflareResolvedEnv: null,
 	cloudflareApiBaseUrl: 'https://api.fsky.top',
 	cloudflarePublicBaseUrl: 'https://share.fsky.top',
 	cloudflareAccountBaseUrl: 'https://mdfriday.com/account',
@@ -117,6 +141,23 @@ export default class FridayPlugin extends Plugin {
 	async onload() {
 		this.pluginDir = `${this.manifest.dir}`;
 		await this.loadSettings();
+
+		// Obsidian official deep link: obsidian://mdfriday-publish?event=auth&ok=1
+		this.registerObsidianProtocolHandler('mdfriday-publish', async (params) => {
+			const event = params.event || params.action;
+			if (event === 'auth' && (params.ok === '1' || params.ok === 'true')) {
+				const mgr = this.projectServiceManager;
+				if (mgr) {
+					const r = await mgr.refreshCloudflareAccount();
+					new Notice(
+						r.success
+							? `Signed in (${r.kind}/${r.plan}). Guest sites claimed if any.`
+							: `Account refresh failed: ${r.error}`,
+						5000,
+					);
+				}
+			}
+		});
 		
 		// Initialize core services (always needed)
 		await this.initCore();
@@ -394,6 +435,9 @@ export default class FridayPlugin extends Plugin {
 			apiBaseUrl: this.settings.cloudflareApiBaseUrl,
 			publicBaseUrl: this.settings.cloudflarePublicBaseUrl,
 		});
+
+		// Resolve env (auto → local|staging) and wire live ControlPlane URL
+		await this.applyCloudflareEnv({ persist: true });
 		
 		// Create Identity HTTP client for Auth, License, and Domain services
 		const identityHttpClient = createObsidianIdentityHttpClient();
@@ -1466,6 +1510,55 @@ export default class FridayPlugin extends Plugin {
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 		this.previousDownloadServer = this.settings.downloadServer;
+		if (!this.settings.cloudflareEnv) {
+			this.settings.cloudflareEnv = 'auto';
+		}
+		// Migrate legacy guest token → mdfKey (one-shot)
+		if (!this.settings.mdfKey && this.settings.cloudflareGuestToken) {
+			this.settings.mdfKey = this.settings.cloudflareGuestToken;
+			this.settings.mdfKeyKind = 'guest';
+			this.settings.cloudflareGuestToken = null;
+			await this.saveData(this.settings);
+		}
+	}
+
+	/**
+	 * Resolve cloudflareEnv → concrete endpoints, update settings + live Foundry client.
+	 * Call on startup, when the Environment dropdown changes, and before guest/publish.
+	 */
+	async applyCloudflareEnv(opts: { persist?: boolean; noticeOnSwitch?: boolean } = {}): Promise<CloudflareEnvResolved> {
+		const mode = this.settings.cloudflareEnv || 'auto';
+		const resolved = await resolveCloudflareEnv(mode);
+		const endpoints = endpointsForEnv(resolved);
+		const prev = this.settings.cloudflareResolvedEnv;
+		const switched = prev != null && prev !== resolved;
+
+		if (switched && this.settings.mdfKey) {
+			this.settings.mdfKey = null;
+			this.settings.mdfKeyKind = null;
+			this.settings.mdfKeyPlan = null;
+			if (opts.noticeOnSwitch !== false) {
+				new Notice(
+					`Cloudflare env → ${resolved}; cleared Key (re-publish to get a new one).`,
+					5000,
+				);
+			}
+		}
+
+		this.settings.cloudflareResolvedEnv = resolved;
+		this.settings.cloudflareApiBaseUrl = endpoints.apiBaseUrl;
+		this.settings.cloudflarePublicBaseUrl = endpoints.publicBaseUrl;
+		this.settings.cloudflareAccountBaseUrl = endpoints.accountBaseUrl;
+
+		this.foundryPublishService?.applyCloudflareEndpoints({
+			apiBaseUrl: endpoints.apiBaseUrl,
+			publicBaseUrl: endpoints.publicBaseUrl,
+		});
+
+		if (opts.persist !== false) {
+			await this.saveData(this.settings);
+		}
+		return resolved;
 	}
 
 	async saveSettings() {
