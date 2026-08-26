@@ -240,6 +240,7 @@ export class ProjectServiceManager {
 
 	/**
 	 * Ensure we have an MDF_… Key (create guest if needed).
+	 * Staging/prod: open hosted Turnstile challenge → deep link token → guest.
 	 */
 	async ensureMdfKey(): Promise<string | null> {
 		await this.plugin.applyCloudflareEnv({ persist: true });
@@ -250,9 +251,30 @@ export class ProjectServiceManager {
 		const foundry = this.plugin.foundryPublishService;
 		if (!foundry) return null;
 
-		const guest = await foundry.guest();
+		let turnstileToken: string | undefined;
+		const resolved = this.plugin.settings.cloudflareResolvedEnv || 'local';
+		if (resolved !== 'local') {
+			try {
+				const token = await this.plugin.requestTurnstileToken();
+				if (!token) {
+					new Notice('Turnstile required but no challenge URL configured', 5000);
+					return null;
+				}
+				turnstileToken = token;
+			} catch (e) {
+				new Notice((e as Error).message || 'Turnstile failed', 5000);
+				return null;
+			}
+		}
+
+		const guest = await foundry.guest(
+			turnstileToken ? { turnstileToken } : undefined,
+		);
 		const key = guest.key || guest.token;
-		if (!guest.success || !key) return null;
+		if (!guest.success || !key) {
+			new Notice(guest.error || 'Could not create guest Key', 5000);
+			return null;
+		}
 
 		this.plugin.settings.mdfKey = key;
 		this.plugin.settings.mdfKeyKind = 'guest';

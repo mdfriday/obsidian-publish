@@ -126,6 +126,13 @@ export default class FridayPlugin extends Plugin {
 	
 	// Project initialization flag (prevents auto-save during new project creation)
 	isProjectInitializing: boolean = false
+
+	/** Pending Turnstile deep-link waiter (staging/prod guest challenge). */
+	private turnstileWaiter: {
+		resolve: (token: string) => void;
+		reject: (err: Error) => void;
+		timer: ReturnType<typeof setTimeout>;
+	} | null = null;
 	
 	// PC-only state
 	private previousDownloadServer: 'global' | 'east' = 'global'
@@ -142,9 +149,15 @@ export default class FridayPlugin extends Plugin {
 		this.pluginDir = `${this.manifest.dir}`;
 		await this.loadSettings();
 
-		// Obsidian official deep link: obsidian://mdfriday-publish?event=auth&ok=1
+		// Obsidian official deep link:
+		//   obsidian://mdfriday-publish?event=auth&ok=1
+		//   obsidian://mdfriday-publish?event=turnstile&token=…
 		this.registerObsidianProtocolHandler('mdfriday-publish', async (params) => {
 			const event = params.event || params.action;
+			if (event === 'turnstile' && params.token) {
+				this.resolveTurnstileToken(params.token);
+				return;
+			}
 			if (event === 'auth' && (params.ok === '1' || params.ok === 'true')) {
 				const mgr = this.projectServiceManager;
 				if (mgr) {
@@ -1559,6 +1572,45 @@ export default class FridayPlugin extends Plugin {
 			await this.saveData(this.settings);
 		}
 		return resolved;
+	}
+
+	/**
+	 * Open hosted Turnstile challenge and wait for deep link token.
+	 * Local env returns null (API skips Turnstile).
+	 */
+	async requestTurnstileToken(timeoutMs = 120_000): Promise<string | null> {
+		const resolved = this.settings.cloudflareResolvedEnv || 'staging';
+		const challengeUrl = endpointsForEnv(resolved).guestChallengeUrl;
+		if (!challengeUrl) return null;
+
+		if (this.turnstileWaiter) {
+			this.turnstileWaiter.reject(new Error('Turnstile challenge superseded'));
+			clearTimeout(this.turnstileWaiter.timer);
+			this.turnstileWaiter = null;
+		}
+
+		new Notice('Complete the security check in your browser…', 6000);
+		window.open(challengeUrl, '_blank');
+
+		return new Promise<string>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				this.turnstileWaiter = null;
+				reject(new Error('Turnstile challenge timed out — open Account / try again'));
+			}, timeoutMs);
+			this.turnstileWaiter = { resolve, reject, timer };
+		});
+	}
+
+	resolveTurnstileToken(token: string): void {
+		if (!this.turnstileWaiter) {
+			new Notice('Received Turnstile token (no pending challenge). Try publish again.', 4000);
+			return;
+		}
+		clearTimeout(this.turnstileWaiter.timer);
+		const { resolve } = this.turnstileWaiter;
+		this.turnstileWaiter = null;
+		resolve(token);
+		new Notice('Security check OK — continuing…', 3000);
 	}
 
 	async saveSettings() {

@@ -12,6 +12,8 @@ export interface CloudflareEndpoints {
   apiBaseUrl: string;
   publicBaseUrl: string;
   accountBaseUrl: string;
+  /** Hosted Turnstile challenge (HTTPS). Empty for local (skip). */
+  guestChallengeUrl: string;
 }
 
 /** Canonical presets — edit here, not in settings fields. */
@@ -20,16 +22,19 @@ export const CLOUDFLARE_ENV_PRESETS: Record<CloudflareEnvResolved, CloudflareEnd
     apiBaseUrl: 'http://127.0.0.1:8787',
     publicBaseUrl: 'http://127.0.0.1:8788',
     accountBaseUrl: 'http://127.0.0.1:8080/account',
+    guestChallengeUrl: '',
   },
   staging: {
     apiBaseUrl: 'https://api.fsky.top',
     publicBaseUrl: 'https://share.fsky.top',
-    accountBaseUrl: 'https://mdfriday.com/account',
+    accountBaseUrl: 'https://fsky.top/account',
+    guestChallengeUrl: 'https://fsky.top/guest-challenge/',
   },
   production: {
     apiBaseUrl: 'https://api.mdfriday.com',
     publicBaseUrl: 'https://share.mdfriday.com',
     accountBaseUrl: 'https://mdfriday.com/account',
+    guestChallengeUrl: 'https://mdfriday.com/guest-challenge/',
   },
 };
 
