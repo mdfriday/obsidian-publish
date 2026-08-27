@@ -52,6 +52,8 @@ interface FridaySettings {
 	mdfProjectCount: number | null;
 	mdfQuotaMaxProjects: number | null;
 	mdfQuotaRetentionDays: number | null;
+	mdfQuotaMaxCustomDomains: number | null;
+	mdfQuotaFeatures: string[] | null;
 	/** @deprecated migrated to mdfKey */
 	cloudflareGuestToken?: string | null;
 	/** @deprecated migrated away — JWT not stored in plugin */
@@ -81,6 +83,8 @@ const DEFAULT_SETTINGS: FridaySettings = {
 	mdfProjectCount: null,
 	mdfQuotaMaxProjects: null,
 	mdfQuotaRetentionDays: null,
+	mdfQuotaMaxCustomDomains: null,
+	mdfQuotaFeatures: null,
 	cloudflareEnv: 'auto',
 	cloudflareResolvedEnv: null,
 	cloudflareApiBaseUrl: 'https://api.fsky.top',
@@ -315,6 +319,15 @@ export default class FridayPlugin extends Plugin {
 					modal.open();
 				}
 			}
+		});
+
+		this.addCommand({
+			id: 'open-cloudflare-projects',
+			name: 'Cloudflare: manage remote projects / domains',
+			callback: async () => {
+				const { CloudflareProjectsModal } = await import('./projects/cloudflareProjectsModal');
+				new CloudflareProjectsModal(this.app, this).open();
+			},
 		});
 		
 		// Register context menu for files and folders (PC-only)
@@ -1569,6 +1582,8 @@ export default class FridayPlugin extends Plugin {
 			this.settings.mdfProjectCount = null;
 			this.settings.mdfQuotaMaxProjects = null;
 			this.settings.mdfQuotaRetentionDays = null;
+			this.settings.mdfQuotaMaxCustomDomains = null;
+			this.settings.mdfQuotaFeatures = null;
 			if (opts.noticeOnSwitch !== false) {
 				new Notice(
 					`Cloudflare env → ${resolved}; cleared Key (re-publish to get a new one).`,

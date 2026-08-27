@@ -11,6 +11,20 @@ export function computeShareBaseUrl(publicBaseUrl: string, siteId: string): stri
 }
 
 /**
+ * Custom domain Hugo baseURL — root-relative per arch/03-build-contract.md.
+ * Hostname is used only for the public access URL, not baked into asset paths.
+ */
+export function computeCustomBaseUrl(_hostname?: string): string {
+	return '/';
+}
+
+/** Absolute site URL shown after publish (custom hosting). */
+export function computeCustomPublicUrl(hostname: string): string {
+	const host = hostname.replace(/^https?:\/\//, '').replace(/\/$/, '');
+	return `https://${host}/`;
+}
+
+/**
  * Project Service Manager
  * 
  * 统一管理项目相关的所有 Foundry 服务
@@ -242,14 +256,23 @@ export class ProjectServiceManager {
 	/**
 	 * Ensure we have an MDF_… Key (create guest if needed).
 	 * Staging/prod: open hosted Turnstile challenge → deep link token → guest.
+	 *
+	 * Important: if a Key already exists, do NOT re-run auto env probe — that can flip
+	 * auto→local when `npm run local` is up and wipe the staging Personal Key.
 	 */
 	async ensureMdfKey(): Promise<string | null> {
-		await this.plugin.applyCloudflareEnv({ persist: true });
-
+		const foundry = this.plugin.foundryPublishService;
 		if (this.plugin.settings.mdfKey) {
+			// Keep ControlPlane URL in sync with current settings (no auto re-probe).
+			foundry?.applyCloudflareEndpoints({
+				apiBaseUrl: this.plugin.settings.cloudflareApiBaseUrl,
+				publicBaseUrl: this.plugin.settings.cloudflarePublicBaseUrl,
+			});
 			return this.plugin.settings.mdfKey;
 		}
-		const foundry = this.plugin.foundryPublishService;
+
+		await this.plugin.applyCloudflareEnv({ persist: true });
+
 		if (!foundry) return null;
 
 		let turnstileToken: string | undefined;
@@ -339,6 +362,8 @@ export class ProjectServiceManager {
 					storageBytes?: number;
 					maxProjects?: number | null;
 					retentionDays?: number | null;
+					maxCustomDomains?: number;
+					features?: string[];
 				};
 			};
 			if (!account.kind || !account.plan) {
@@ -369,6 +394,13 @@ export class ProjectServiceManager {
 					: typeof account.quota?.retentionDays === 'number'
 						? account.quota.retentionDays
 						: null;
+			this.plugin.settings.mdfQuotaMaxCustomDomains =
+				typeof account.quota?.maxCustomDomains === 'number'
+					? account.quota.maxCustomDomains
+					: null;
+			this.plugin.settings.mdfQuotaFeatures = Array.isArray(account.quota?.features)
+				? account.quota!.features!
+				: null;
 
 			const foundry = this.plugin.foundryPublishService;
 			if (foundry) {
@@ -399,12 +431,21 @@ export class ProjectServiceManager {
 	}
 
 	/**
-	 * Bind remote project and persist share-mode baseURL before build.
-	 * arch/03: share baseURL = https://share…/s/{siteId}/
+	 * Bind remote project and persist publish baseURL before build.
+	 * share → https://share…/s/{siteId}/
+	 * custom → `/` (root-relative) + publicUrl https://{hostname}/
 	 */
 	async ensureShareBaseUrl(
 		projectName: string,
-	): Promise<{ siteId: string; baseURL: string } | { error: string }> {
+	): Promise<
+		| {
+				siteId: string;
+				baseURL: string;
+				hostingMode: 'share' | 'custom';
+				publicUrl: string;
+		  }
+		| { error: string }
+	> {
 		const foundry = this.plugin.foundryPublishService;
 		if (!foundry) {
 			return { error: 'Publish service not initialized' };
@@ -430,17 +471,134 @@ export class ProjectServiceManager {
 		if (!binding.success) {
 			return { error: binding.error || 'Failed to bind Cloudflare project' };
 		}
-		if (!binding.siteId) {
+		if (!binding.siteId && binding.hostingMode !== 'custom') {
 			return { error: 'Cloudflare project has no siteId yet' };
 		}
 
-		const baseURL = computeShareBaseUrl(publicBaseUrl, binding.siteId);
+		let hostingMode: 'share' | 'custom' = binding.hostingMode === 'custom' ? 'custom' : 'share';
+		let baseURL =
+			binding.siteId != null
+				? computeShareBaseUrl(publicBaseUrl, binding.siteId)
+				: '';
+		let publicUrl = baseURL ? `${baseURL.replace(/\/$/, '')}/index.html` : '';
+
+		// Prefer live domain state over local binding (activation may have flipped remote only)
+		if (binding.cloudflareProjectId) {
+			const domains = await foundry.listDomains(auth.token, binding.cloudflareProjectId);
+			const active = domains.domains?.find(
+				(d) => d.status === 'active' || d.certStatus === 'active',
+			);
+			if (active?.hostname) {
+				hostingMode = 'custom';
+				baseURL = computeCustomBaseUrl(active.hostname);
+				publicUrl = computeCustomPublicUrl(active.hostname);
+				if (binding.hostingMode !== 'custom') {
+					await foundry.markBindingCustom({
+						workspacePath: this.plugin.absWorkspacePath,
+						projectName,
+						hostname: active.hostname,
+					});
+				}
+			} else if (hostingMode === 'custom' && binding.siteId) {
+				// Remote says custom but no active domain — fall back to share paths
+				hostingMode = 'share';
+				baseURL = computeShareBaseUrl(publicBaseUrl, binding.siteId);
+				publicUrl = `${baseURL.replace(/\/$/, '')}/index.html`;
+			}
+		}
+
+		if (!baseURL) {
+			return { error: 'Could not resolve publish baseURL' };
+		}
+
 		const saved = await this.saveConfig(projectName, 'baseURL', baseURL);
 		if (!saved) {
 			console.warn('[ProjectServiceManager] Failed to persist baseURL');
 		}
 
-		return { siteId: binding.siteId, baseURL };
+		return {
+			siteId: binding.siteId || '',
+			baseURL,
+			hostingMode,
+			publicUrl,
+		};
+	}
+
+	async listRemoteCloudflareProjects(): Promise<{
+		success: boolean;
+		projects?: Array<{
+			id: string;
+			siteId?: string;
+			title?: string;
+			kind?: string;
+			hostingMode?: string;
+			status?: string;
+			expiresAt?: number | null;
+			domainHostname?: string;
+			domainStatus?: string;
+			domainCertStatus?: string;
+		}>;
+		error?: string;
+	}> {
+		const auth = await this.resolveAuthToken();
+		if (!auth) return { success: false, error: 'No MDF Key' };
+
+		const apiBase = (this.plugin.settings.cloudflareApiBaseUrl || '').replace(/\/$/, '');
+		if (!apiBase) {
+			return { success: false, error: 'API base URL missing — set Cloudflare environment in Settings' };
+		}
+
+		const url = `${apiBase}/v1/projects`;
+		try {
+			// Direct requestUrl (same as Account refresh) — clearer DNS/network errors than Foundry path
+			const res = await requestUrl({
+				url,
+				method: 'GET',
+				headers: { Authorization: `Bearer ${auth.token}` },
+				throw: false,
+			});
+			if (res.status < 200 || res.status >= 300) {
+				const errBody = typeof res.json === 'object' && res.json ? res.json : null;
+				const msg =
+					(errBody as { error?: { message?: string } })?.error?.message ||
+					`HTTP ${res.status}`;
+				return { success: false, error: `${msg} (${url})` };
+			}
+			const body = (res.json || JSON.parse(res.text || '{}')) as {
+				projects?: Array<Record<string, unknown>>;
+			};
+			const projects = (body.projects || []).map((p) => {
+				const hostingMode = (p.hostingMode ?? p.hosting_mode) as string | undefined;
+				const siteId = (p.siteId ?? p.site_id) as string | undefined;
+				const expiresAt = (p.expiresAt ?? p.expires_at) as number | null | undefined;
+				const domainHostname = (p.domainHostname ?? p.domain_hostname) as string | undefined;
+				const domainStatus = (p.domainStatus ?? p.domain_status) as string | undefined;
+				const domainCertStatus = (p.domainCertStatus ?? p.domain_cert_status) as
+					| string
+					| undefined;
+				return {
+					id: String(p.id || ''),
+					...(siteId ? { siteId } : {}),
+					...(typeof p.title === 'string' ? { title: p.title } : {}),
+					...(typeof p.kind === 'string' ? { kind: p.kind } : {}),
+					...(hostingMode === 'share' || hostingMode === 'custom'
+						? { hostingMode }
+						: {}),
+					...(typeof p.status === 'string' ? { status: p.status } : {}),
+					...(expiresAt !== undefined ? { expiresAt: expiresAt as number | null } : {}),
+					...(domainHostname ? { domainHostname } : {}),
+					...(domainStatus ? { domainStatus } : {}),
+					...(domainCertStatus ? { domainCertStatus } : {}),
+				};
+			});
+			return { success: true, projects };
+		} catch (e) {
+			const raw = e instanceof Error ? e.message : String(e);
+			const hint = /NAME_NOT_RESOLVED|ENOTFOUND|getaddrinfo/i.test(raw)
+				? ` DNS failed for ${apiBase}. Check Cloudflare environment (Staging vs Local) and that api.fsky.top resolves.`
+				: '';
+			return { success: false, error: `${raw} (${url})${hint}` };
+		}
 	}
 
 	/**
@@ -475,6 +633,7 @@ export class ProjectServiceManager {
 
 		const publishResult = await this.publish(projectName, {
 			method: 'cloudflare',
+			hostingMode: ensured.hostingMode,
 			onProgress: (progress) => onProgress?.(progress),
 		});
 
@@ -482,8 +641,13 @@ export class ProjectServiceManager {
 			return publishResult;
 		}
 
+		const rawUrl = publishResult.url || '';
+		const url =
+			!rawUrl || /\(custom-domain\)/i.test(rawUrl) ? ensured.publicUrl : rawUrl;
+
 		return {
 			...publishResult,
+			url,
 			baseURL: ensured.baseURL,
 			siteId: ensured.siteId,
 		};
@@ -649,6 +813,7 @@ export class ProjectServiceManager {
 		options: {
 			method?: string;
 			config?: unknown;
+			hostingMode?: 'share' | 'custom';
 			onProgress?: (progress: PublishProgressUpdate) => void;
 		}
 	): Promise<PublishResult> {
@@ -675,7 +840,9 @@ export class ProjectServiceManager {
 					guest: auth.kind === 'guest',
 					apiBaseUrl: this.plugin.settings.cloudflareApiBaseUrl,
 					publicBaseUrl: this.plugin.settings.cloudflarePublicBaseUrl,
-					hostingMode: 'share',
+					hostingMode: options.hostingMode ?? 'share',
+					// Custom: empty release prefix needs full tree until server copyFrom exists
+					force: options.hostingMode === 'custom',
 				},
 				onProgress as unknown as Parameters<typeof foundry.publishCloudflare>[1],
 			);

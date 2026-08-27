@@ -277,18 +277,24 @@ export class ObsidianHttpClient implements PublishHttpClient {
    * GET request
    */
   async get(url: string, headers?: Record<string, string>): Promise<PublishHttpResponse> {
+    const sanitized = sanitizeRequestHeaders(headers);
     const request: RequestUrlParam = {
       url,
       method: 'GET',
+      throw: false,
     };
     
-    if (headers) {
-      request.headers = headers;
+    if (sanitized) {
+      request.headers = sanitized;
     }
 
-    const response = await requestUrl(request);
-
-    return adaptObsidianResponse(response);
+    try {
+      const response = await requestUrl(request);
+      return adaptObsidianResponse(response);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`${msg} [${url}]`);
+    }
   }
 
   /**

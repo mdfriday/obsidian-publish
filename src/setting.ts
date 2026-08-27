@@ -28,6 +28,8 @@ function clearAccountSnapshot(plugin: FridayPlugin): void {
 	plugin.settings.mdfProjectCount = null;
 	plugin.settings.mdfQuotaMaxProjects = null;
 	plugin.settings.mdfQuotaRetentionDays = null;
+	plugin.settings.mdfQuotaMaxCustomDomains = null;
+	plugin.settings.mdfQuotaFeatures = null;
 }
 
 function buildPlanDesc(plugin: FridayPlugin): string {
@@ -70,8 +72,11 @@ function buildPlanDesc(plugin: FridayPlugin): string {
 		return `Free · Storage ${storageLabel} · ${proj} · ${retain}${exp}`;
 	}
 	if (plan === 'personal' || plan === 'pro') {
+		const domains = plugin.settings.mdfQuotaMaxCustomDomains;
+		const domainLabel =
+			domains != null ? ` · Custom domains up to ${domains}` : '';
 		return (
-			`${plan.charAt(0).toUpperCase() + plan.slice(1)} · Storage ${storageLabel} · Permanent retention`
+			`${plan.charAt(0).toUpperCase() + plan.slice(1)} · Storage ${storageLabel} · Permanent retention${domainLabel}`
 		);
 	}
 	return `Plan: ${plan}. Use Refresh status to load quota.`;
@@ -243,6 +248,21 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 		}
 
+		new Setting(containerEl)
+			.setName('Cloudflare projects')
+			.setDesc(
+				'List remote sites on your Key. Personal: bind a custom domain (TXT + CNAME). Free/Guest: list only — domain requires upgrade.',
+			)
+			.addButton((btn) => {
+				btn.setButtonText('Manage…');
+				btn.onClick(async () => {
+					const { CloudflareProjectsModal } = await import(
+						'./projects/cloudflareProjectsModal'
+					);
+					new CloudflareProjectsModal(this.app, this.plugin).open();
+				});
+			});
+
 		if (Platform.isDesktop) {
 			containerEl.createEl('h3', {text: 'Advanced', cls: 'friday-section-title'});
 
@@ -253,7 +273,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			new Setting(containerEl)
 				.setName('Cloudflare environment')
 				.setDesc(
-					`One switch for API / Share / Account. Auto = use local if :8787 is up, else staging. Now: ${resolved}. ` +
+					`One switch for API / Share / Account. Prefer Staging (not Auto) when testing Personal/domains — Auto may flip to Local if :8787 is up and clear your Key. Now: ${resolved}. ` +
 						`API ${this.plugin.settings.cloudflareApiBaseUrl} · Account ${this.plugin.settings.cloudflareAccountBaseUrl}`,
 				)
 				.addDropdown((dropdown) => {
