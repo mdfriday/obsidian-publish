@@ -214,6 +214,35 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 			});
 
+		const planLower = (this.plugin.settings.mdfKeyPlan || '').toLowerCase();
+		if (kind === 'user' && planLower === 'free') {
+			new Setting(containerEl)
+				.setName('Upgrade to Personal')
+				.setDesc('Permanent hosting and larger storage. Opens Account to start checkout.')
+				.addButton((btn) => {
+					btn.setButtonText('Upgrade…');
+					btn.setCta();
+					btn.onClick(async () => {
+						const mgr = this.plugin.projectServiceManager;
+						if (!mgr) {
+							new Notice('Publish service not ready', 3000);
+							return;
+						}
+						const key = await mgr.ensureMdfKey();
+						if (!key) {
+							new Notice('Could not create guest Key', 3000);
+							return;
+						}
+						const accountBase = (
+							this.plugin.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account'
+						).replace(/\/$/, '');
+						const url = `${accountBase}/?key=${encodeURIComponent(key)}`;
+						window.open(url, '_blank');
+						new Notice('Sign in on Account if needed, then click Upgrade to Personal.', 6000);
+					});
+				});
+		}
+
 		if (Platform.isDesktop) {
 			containerEl.createEl('h3', {text: 'Advanced', cls: 'friday-section-title'});
 
