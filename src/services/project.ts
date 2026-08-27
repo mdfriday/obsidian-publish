@@ -1,4 +1,5 @@
 import type FridayPlugin from '../main';
+import {Notice, requestUrl} from 'obsidian';
 import type {TFile, TFolder} from 'obsidian';
 import type {ProgressUpdate, PublishProgressUpdate} from '../types/events';
 import {joinPath} from '../utils/common';
@@ -279,6 +280,9 @@ export class ProjectServiceManager {
 		this.plugin.settings.mdfKey = key;
 		this.plugin.settings.mdfKeyKind = 'guest';
 		this.plugin.settings.mdfKeyPlan = 'guest';
+		if (typeof guest.contentExpiresAt === 'number') {
+			this.plugin.settings.mdfContentExpiresAt = guest.contentExpiresAt;
+		}
 		await this.plugin.saveSettings();
 		foundry.setKey(key, 'guest');
 		return key;
@@ -300,23 +304,84 @@ export class ProjectServiceManager {
 		plan?: string;
 		error?: string;
 	}> {
-		const foundry = this.plugin.foundryPublishService;
-		if (!foundry) {
-			return { success: false, error: 'Publish service not initialized' };
-		}
 		const key = this.plugin.settings.mdfKey;
 		if (!key) {
 			return { success: false, error: 'No MDF Key' };
 		}
-		foundry.setKey(key);
-		const account = await foundry.getAccount();
-		if (!account.success) {
-			return { success: false, error: account.error || 'getAccount failed' };
+
+		const apiBase = (this.plugin.settings.cloudflareApiBaseUrl || '').replace(/\/$/, '');
+		if (!apiBase) {
+			return { success: false, error: 'API base URL missing' };
 		}
-		this.plugin.settings.mdfKeyKind = account.kind ?? null;
-		this.plugin.settings.mdfKeyPlan = account.plan ?? null;
-		await this.plugin.saveSettings();
-		return { success: true, kind: account.kind, plan: account.plan };
+
+		// Prefer direct Account API (settings UI) — avoids depending on Foundry VO mapping.
+		try {
+			const res = await requestUrl({
+				url: `${apiBase}/v1/account`,
+				method: 'GET',
+				headers: { Authorization: `Bearer ${key}` },
+				throw: false,
+			});
+			if (res.status < 200 || res.status >= 300) {
+				const errBody = typeof res.json === 'object' && res.json ? res.json : null;
+				const msg =
+					(errBody as { error?: { message?: string } })?.error?.message ||
+					`HTTP ${res.status}`;
+				return { success: false, error: msg };
+			}
+			const account = (res.json || JSON.parse(res.text || '{}')) as {
+				kind?: string;
+				plan?: string;
+				storageBytes?: number;
+				contentExpiresAt?: number | null;
+				projectCount?: number;
+				quota?: {
+					storageBytes?: number;
+					maxProjects?: number | null;
+					retentionDays?: number | null;
+				};
+			};
+			if (!account.kind || !account.plan) {
+				return { success: false, error: 'account response missing kind/plan' };
+			}
+
+			this.plugin.settings.mdfKeyKind = account.kind === 'user' ? 'user' : 'guest';
+			this.plugin.settings.mdfKeyPlan = account.plan;
+			this.plugin.settings.mdfStorageBytes =
+				typeof account.storageBytes === 'number' ? account.storageBytes : 0;
+			this.plugin.settings.mdfQuotaStorageBytes =
+				typeof account.quota?.storageBytes === 'number'
+					? account.quota.storageBytes
+					: null;
+			this.plugin.settings.mdfContentExpiresAt =
+				typeof account.contentExpiresAt === 'number' ? account.contentExpiresAt : null;
+			this.plugin.settings.mdfProjectCount =
+				typeof account.projectCount === 'number' ? account.projectCount : 0;
+			this.plugin.settings.mdfQuotaMaxProjects =
+				account.quota?.maxProjects === null
+					? null
+					: typeof account.quota?.maxProjects === 'number'
+						? account.quota.maxProjects
+						: null;
+			this.plugin.settings.mdfQuotaRetentionDays =
+				account.quota?.retentionDays === null
+					? null
+					: typeof account.quota?.retentionDays === 'number'
+						? account.quota.retentionDays
+						: null;
+
+			const foundry = this.plugin.foundryPublishService;
+			if (foundry) {
+				foundry.setKey(key, account.kind === 'user' ? 'user' : 'guest');
+			}
+			await this.plugin.saveSettings();
+			return { success: true, kind: account.kind, plan: account.plan };
+		} catch (e) {
+			return {
+				success: false,
+				error: e instanceof Error ? e.message : String(e),
+			};
+		}
 	}
 
 	/** @deprecated JWT paste path removed — Account claim is on mdfriday.com */

@@ -4,8 +4,82 @@ import type FridayPlugin from './main';
 /** Obsidian official protocol: obsidian://mdfriday-publish?... */
 export const OBSIDIAN_PROTOCOL_ACTION = 'mdfriday-publish';
 
+function formatBytes(n: number): string {
+	if (n < 1024) return `${n} B`;
+	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+	return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatExpiry(ms: number | null): string {
+	if (ms == null || !Number.isFinite(ms)) return '—';
+	const d = new Date(ms);
+	const utc = d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+	const local = d.toLocaleString();
+	return `${local} (${utc})`;
+}
+
+function clearAccountSnapshot(plugin: FridayPlugin): void {
+	plugin.settings.mdfKey = null;
+	plugin.settings.mdfKeyKind = null;
+	plugin.settings.mdfKeyPlan = null;
+	plugin.settings.mdfStorageBytes = null;
+	plugin.settings.mdfQuotaStorageBytes = null;
+	plugin.settings.mdfContentExpiresAt = null;
+	plugin.settings.mdfProjectCount = null;
+	plugin.settings.mdfQuotaMaxProjects = null;
+	plugin.settings.mdfQuotaRetentionDays = null;
+}
+
+function buildPlanDesc(plugin: FridayPlugin): string {
+	const mdfKey = plugin.settings.mdfKey;
+	const kind = plugin.settings.mdfKeyKind;
+	const plan = (plugin.settings.mdfKeyPlan || kind || '—').toLowerCase();
+	const used = plugin.settings.mdfStorageBytes;
+	const quotaBytes = plugin.settings.mdfQuotaStorageBytes;
+	const expiresAt = plugin.settings.mdfContentExpiresAt;
+	const projectCount = plugin.settings.mdfProjectCount;
+	const maxProjects = plugin.settings.mdfQuotaMaxProjects;
+	const retentionDays = plugin.settings.mdfQuotaRetentionDays;
+	const storageLabel =
+		used != null && quotaBytes != null
+			? `${formatBytes(used)} / ${formatBytes(quotaBytes)}`
+			: used != null
+				? formatBytes(used)
+				: '—';
+
+	if (!mdfKey) {
+		return 'Publish once or refresh after login to load plan limits.';
+	}
+	if (plan === 'guest') {
+		return (
+			`Guest · Storage ${storageLabel} · ` +
+			`Content clears: ${formatExpiry(expiresAt)} · Sign in on Account to keep the same URL.`
+		);
+	}
+	if (plan === 'free') {
+		const proj =
+			projectCount != null
+				? `Projects ${projectCount}${maxProjects != null ? ` / ${maxProjects}` : ''}`
+				: 'Projects —';
+		const retain =
+			retentionDays != null
+				? `Retention ~${retentionDays} days without publish activity`
+				: 'Retention per Free plan';
+		const exp =
+			expiresAt != null ? ` · Next content expiry: ${formatExpiry(expiresAt)}` : '';
+		return `Free · Storage ${storageLabel} · ${proj} · ${retain}${exp}`;
+	}
+	if (plan === 'personal' || plan === 'pro') {
+		return (
+			`${plan.charAt(0).toUpperCase() + plan.slice(1)} · Storage ${storageLabel} · Permanent retention`
+		);
+	}
+	return `Plan: ${plan}. Use Refresh status to load quota.`;
+}
+
 export class FridaySettingTab extends PluginSettingTab {
 	plugin: FridayPlugin;
+	private refreshingQuota = false;
 
 	constructor(app: App, plugin: FridayPlugin) {
 		super(app, plugin);
@@ -24,7 +98,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Publish to Cloudflare')
 			.setDesc(
-				'Guest needs no account. Sign in via mdfriday.com Account to claim sites (same MDF Key). Content expires next UTC midnight until claimed.',
+				'Guest needs no account. Sign in via Account to claim sites (same MDF Key). Guest content clears at next UTC midnight until claimed.',
 			);
 
 		const mdfKey = this.plugin.settings.mdfKey;
@@ -34,7 +108,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			.setName('Credential (MDF Key)')
 			.setDesc(
 				mdfKey
-					? `Key ${mdfKey.slice(0, 12)}… — kind shown beside: ${kind ?? 'unknown'}. Key string has no type prefix.`
+					? `Key ${mdfKey.slice(0, 12)}… — kind: ${kind ?? 'unknown'}. Key string has no type prefix.`
 					: 'Not created yet — issued on first publish (guest).',
 			)
 			.addExtraButton((btn) => {
@@ -55,20 +129,44 @@ export class FridaySettingTab extends PluginSettingTab {
 				btn.setButtonText('Clear Key').setWarning();
 				btn.setDisabled(!mdfKey);
 				btn.onClick(async () => {
-					this.plugin.settings.mdfKey = null;
-					this.plugin.settings.mdfKeyKind = null;
-					this.plugin.settings.mdfKeyPlan = null;
+					clearAccountSnapshot(this.plugin);
 					await this.plugin.saveSettings();
 					this.display();
 				});
 			});
 
+		const needsQuotaFetch =
+			!!mdfKey &&
+			(this.plugin.settings.mdfQuotaStorageBytes == null ||
+				this.plugin.settings.mdfStorageBytes == null);
+
 		new Setting(containerEl)
-			.setName('Account (Free)')
+			.setName('Plan & quota')
+			.setDesc(
+				needsQuotaFetch && this.refreshingQuota
+					? 'Loading plan limits…'
+					: buildPlanDesc(this.plugin),
+			);
+
+		if (needsQuotaFetch && !this.refreshingQuota) {
+			this.refreshingQuota = true;
+			void this.plugin.projectServiceManager
+				?.refreshCloudflareAccount()
+				.then((r) => {
+					this.refreshingQuota = false;
+					if (r?.success) this.display();
+				})
+				.catch(() => {
+					this.refreshingQuota = false;
+				});
+		}
+
+		new Setting(containerEl)
+			.setName('Account')
 			.setDesc(
 				kind === 'user'
-					? `Signed in as Free/Paid (plan: ${this.plugin.settings.mdfKeyPlan ?? '—'}).`
-					: 'Opens mdfriday.com Account with your Key for Google login + claim. Plugin updates via deep link.',
+					? `Signed in (plan: ${this.plugin.settings.mdfKeyPlan ?? '—'}). Deep link refreshes after claim.`
+					: 'Opens Account with your Key for Google login + claim. Plugin updates via deep link.',
 			)
 			.addButton((btn) => {
 				btn.setButtonText('Open Account login');
@@ -105,7 +203,13 @@ export class FridaySettingTab extends PluginSettingTab {
 						new Notice(r.error || 'Refresh failed', 4000);
 						return;
 					}
-					new Notice(`Account: ${r.kind} / ${r.plan}`, 3000);
+					const used = this.plugin.settings.mdfStorageBytes;
+					const quota = this.plugin.settings.mdfQuotaStorageBytes;
+					const detail =
+						used != null && quota != null
+							? ` · ${formatBytes(used)} / ${formatBytes(quota)}`
+							: '';
+					new Notice(`Account: ${r.kind} / ${r.plan}${detail}`, 4000);
 					this.display();
 				});
 			});

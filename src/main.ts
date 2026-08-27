@@ -45,6 +45,13 @@ interface FridaySettings {
 	mdfKeyKind: 'guest' | 'user' | null;
 	/** Cached plan from GET /v1/account */
 	mdfKeyPlan: string | null;
+	/** Cached usage / quota snapshot from GET /v1/account */
+	mdfStorageBytes: number | null;
+	mdfQuotaStorageBytes: number | null;
+	mdfContentExpiresAt: number | null;
+	mdfProjectCount: number | null;
+	mdfQuotaMaxProjects: number | null;
+	mdfQuotaRetentionDays: number | null;
 	/** @deprecated migrated to mdfKey */
 	cloudflareGuestToken?: string | null;
 	/** @deprecated migrated away — JWT not stored in plugin */
@@ -68,6 +75,12 @@ const DEFAULT_SETTINGS: FridaySettings = {
 	mdfKey: null,
 	mdfKeyKind: null,
 	mdfKeyPlan: null,
+	mdfStorageBytes: null,
+	mdfQuotaStorageBytes: null,
+	mdfContentExpiresAt: null,
+	mdfProjectCount: null,
+	mdfQuotaMaxProjects: null,
+	mdfQuotaRetentionDays: null,
 	cloudflareEnv: 'auto',
 	cloudflareResolvedEnv: null,
 	cloudflareApiBaseUrl: 'https://api.fsky.top',
@@ -1550,6 +1563,12 @@ export default class FridayPlugin extends Plugin {
 			this.settings.mdfKey = null;
 			this.settings.mdfKeyKind = null;
 			this.settings.mdfKeyPlan = null;
+			this.settings.mdfStorageBytes = null;
+			this.settings.mdfQuotaStorageBytes = null;
+			this.settings.mdfContentExpiresAt = null;
+			this.settings.mdfProjectCount = null;
+			this.settings.mdfQuotaMaxProjects = null;
+			this.settings.mdfQuotaRetentionDays = null;
 			if (opts.noticeOnSwitch !== false) {
 				new Notice(
 					`Cloudflare env → ${resolved}; cleared Key (re-publish to get a new one).`,
