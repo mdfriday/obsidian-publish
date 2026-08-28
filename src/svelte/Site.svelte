@@ -94,6 +94,8 @@
 
 	// Preview related state
 	let isBuilding = false;
+	/** True only while user-triggered local preview is preparing */
+	let isPreviewBuilding = false;
 	let buildProgress = 0;
 	let previewUrl = '';
 	let previewId = '';
@@ -372,12 +374,16 @@
 				break;
 			case "error":
 				isBuilding = false;
+				isPreviewBuilding = false;
 				buildProgress = 0;
 				break;
 		}
 
 		// Publish progress from preview+publish (realtime) or build+publish pipeline
 		if (progress.phase === 'publishing' || progress.phase === 'publish-success') {
+			// Publish pipeline owns its own progress; don't leave preview stuck "building"
+			isBuilding = false;
+			isPreviewBuilding = false;
 			if (progress.phase === 'publishing') {
 				isPublishing = true;
 				publishSuccess = false;
@@ -397,15 +403,17 @@
 		if (progress.overallPercentage !== undefined && autoPublishEnabled) {
 			publishProgress = progress.overallPercentage;
 
-			// Set publishing state based on phase
 			if (progress.phase === 'publishing') {
 				isPublishing = true;
 				publishSuccess = false;
+				isBuilding = false;
+				isPreviewBuilding = false;
 			} else if (progress.phase === 'publish-success') {
-				isPublishing = true;
+				isPublishing = false;
 				publishSuccess = true;
+				isBuilding = false;
+				isPreviewBuilding = false;
 				
-				// Extract publish URL from data
 				if (progress.data?.publishUrl) {
 					publishUrl = buildPublishUrl(progress.data.publishUrl);
 				}
@@ -413,6 +421,8 @@
 				isPublishing = false;
 				publishProgress = 0;
 				publishSuccess = false;
+				isBuilding = false;
+				isPreviewBuilding = false;
 			}
 		}
 	}
@@ -473,7 +483,23 @@
 		hasPreview = true;
 		buildProgress = 100;
 		isBuilding = false;
-		previewUrl = result.url || '';
+		isPreviewBuilding = false;
+		previewUrl = normalizeLocalPreviewUrl(result.url || '', result.port || serverPort);
+	}
+
+	/**
+	 * Local preview must be http://localhost:PORT[/path]. Absolute share baseURL must not be appended.
+	 */
+	function normalizeLocalPreviewUrl(raw: string, port: number): string {
+		const fallback = `http://127.0.0.1:${port}/`;
+		if (!raw) return fallback;
+		// Broken: http://localhost:8090https://share…
+		const glued = raw.match(/^(https?:\/\/[^/]+:\d+)(https?:\/\/.*)$/i);
+		if (glued) return `${glued[1]}/`;
+		if (/^https?:\/\//i.test(raw) && !/localhost|127\.0\.0\.1/i.test(raw)) {
+			return fallback;
+		}
+		return raw;
 	}
 
 	/**
@@ -484,6 +510,7 @@
 		hasPreview = false;
 		buildProgress = 0;
 		isBuilding = false;
+		isPreviewBuilding = false;
 		absPreviewDir = ''; // Clear preview directory path on error
 		console.error('[Site] Preview error:', error);
 	}
@@ -518,6 +545,8 @@
 	export function onPublishComplete(result: any) {
 		publishProgress = 100;
 		isPublishing = false;
+		isBuilding = false;
+		isPreviewBuilding = false;
 		publishSuccess = true;
 		authPrepareStep = 'idle';
 
@@ -539,6 +568,8 @@
 	export function onPublishError(error: string) {
 		publishProgress = 0;
 		isPublishing = false;
+		isBuilding = false;
+		isPreviewBuilding = false;
 		publishSuccess = false;
 		console.error('[Site] Publish error:', error);
 	}
@@ -697,17 +728,19 @@
 	}
 
 	$: displaySiteTitle = siteName || plugin.currentProjectName || 'MDFriday';
-	$: isGuestKey = !plugin.settings.mdfKeyKind || plugin.settings.mdfKeyKind === 'guest';
-	$: planLower = (plugin.settings.mdfKeyPlan || plugin.settings.mdfKeyKind || '').toLowerCase();
+	$: planLower = (plugin.settings.mdfKeyPlan || '').toLowerCase();
+	$: kindLower = (plugin.settings.mdfKeyKind || '').toLowerCase();
+	/** Guest Key or no Key yet — nudge to Free via login */
+	$: isGuestAccount =
+		!plugin.settings.mdfKey ||
+		kindLower === 'guest' ||
+		planLower === 'guest';
+	/** Signed-in Free — nudge to Personal */
+	$: isFreeAccount = !isGuestAccount && planLower === 'free';
+	$: isPaidAccount =
+		planLower === 'personal' || planLower === 'pro';
 	$: showUpgradeCard =
-		!!publishUrl &&
-		(isGuestKey || planLower === 'guest' || planLower === 'free');
-	$: upgradeCardTitle = isGuestKey || planLower === 'guest'
-		? t('ui.growth_guest_keep')
-		: t('ui.growth_upgrade_title');
-	$: upgradeCardBody = isGuestKey || planLower === 'guest'
-		? t('ui.growth_guest_expiry')
-		: t('ui.growth_upgrade_body');
+		!!publishUrl && !isPaidAccount && (isGuestAccount || isFreeAccount);
 	
 	// Enable auto-publish mode (called from main.ts for quick publish)
 	export function enableAutoPublish() {
@@ -1172,6 +1205,7 @@
 		}
 
 		isBuilding = true;
+		isPreviewBuilding = true;
 		buildProgress = 0;
 		hasPreview = false;
 
@@ -1212,6 +1246,7 @@
 			console.error('Preview generation failed:', error);
 			new Notice(t('messages.preview_failed', { error: error.message }), 5000);
 			isBuilding = false;
+			isPreviewBuilding = false;
 			buildProgress = 0;
 		}
 		// Note: isBuilding will be set to false by onPreviewStarted/onPreviewError callbacks
@@ -1773,42 +1808,76 @@
 
 				{#if showUpgradeCard}
 					<div class="growth-card">
-						<div class="growth-card-title">{upgradeCardTitle}</div>
-						<p class="growth-card-hint">{upgradeCardBody}</p>
-						<button class="mod-cta growth-sign-in-btn" on:click={openAccountFromGrowth}>
-							{isGuestKey || planLower === 'guest' ? t('settings.login') : t('ui.growth_upgrade_cta')}
-						</button>
+						{#if isGuestAccount}
+							<div class="growth-card-title">{t('ui.growth_guest_keep')}</div>
+							<p class="growth-card-hint">{t('ui.growth_guest_lead')}</p>
+							<ul class="growth-benefits">
+								<li>{t('ui.growth_guest_benefit_keep')}</li>
+								<li>{t('ui.growth_guest_benefit_same_url')}</li>
+								<li>{t('ui.growth_guest_benefit_projects')}</li>
+							</ul>
+							<button class="mod-cta growth-sign-in-btn" on:click={openAccountFromGrowth}>
+								{t('settings.login')}
+							</button>
+						{:else}
+							<div class="growth-card-title">{t('ui.growth_upgrade_title')}</div>
+							<p class="growth-card-hint">{t('ui.growth_upgrade_lead')}</p>
+							<ul class="growth-benefits">
+								<li>{t('ui.growth_upgrade_benefit_domain')}</li>
+								<li>{t('ui.growth_upgrade_benefit_history')}</li>
+								<li>{t('ui.growth_upgrade_benefit_storage')}</li>
+							</ul>
+							<button class="mod-cta growth-sign-in-btn" on:click={openAccountFromGrowth}>
+								{t('ui.growth_upgrade_cta')}
+							</button>
+						{/if}
 					</div>
 				{/if}
 			{/if}
 		</div>
 
 		<!-- Publish Actions -->
+		<!-- Publish Actions: primary CTA + auto-publish -->
 		<div class="publish-actions-row">
 			{#if autoPublishEnabled && isPublishing}
-				<!-- Realtime publishing state with stop button -->
 				<div class="publishing-status">
-					<span class="publishing-text">{t('ui.realtime_publishing') || 'Publishing...'}</span>
+					<span class="publishing-text">{t('ui.realtime_publishing')}</span>
 					<button
 						class="stop-publish-btn"
 						on:click={stopPublish}
-						title={t('ui.stop_publish') || 'Stop Publishing'}
+						title={t('ui.stop_publish')}
 					>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 							<rect x="6" y="6" width="12" height="12"></rect>
 						</svg>
-						{t('ui.stop') || 'Stop'}
+						{t('ui.stop')}
 					</button>
 				</div>
 			{:else}
 				<button
 					class="quick-publish-btn"
 					on:click={startPublish}
-					disabled={currentContents.length === 0 || isPublishing || isBuilding || authPrepareStep === 'waiting'}
+					disabled={currentContents.length === 0 || isPublishing || authPrepareStep === 'waiting'}
 				>
-					{publishUrl ? (t('ui.publish_again') || 'Publish again') : t('ui.publish')}
+					{publishUrl ? t('ui.publish_again') : t('ui.publish')}
 				</button>
 			{/if}
+			<div class="publish-auto-block">
+				<label
+					class="auto-publish-toggle publish-auto-toggle"
+					title={t('ui.realtime_publish_hint')}
+				>
+					<input
+						type="checkbox"
+						class="toggle-checkbox"
+						bind:checked={autoPublishEnabled}
+						on:change={handleAutoPublishToggle}
+						disabled={isPublishing}
+					/>
+					<span class="toggle-label">{t('ui.realtime_publish')}</span>
+				</label>
+				<p class="publish-auto-hint">{t('ui.realtime_publish_hint')}</p>
+			</div>
 		</div>
 	</div>
 
@@ -1887,30 +1956,33 @@
 					<polyline points="6 9 12 15 18 9"></polyline>
 				</svg>
 				<span class="setting-item-name">{t('ui.preview')}</span>
-				<span class="capability-summary">{hasPreview ? (t('ui.preview_ready') || 'Ready') : (t('ui.preview_off') || 'Off')}</span>
+				<span class="capability-summary">
+					{isPreviewBuilding
+						? t('ui.preview_preparing')
+						: hasPreview
+							? t('ui.preview_ready')
+							: t('ui.preview_off')}
+				</span>
 			</button>
 			{#if showPreviewSection}
 				<div class="capability-body-inline">
-					{#if isBuilding}
+					{#if isPreviewBuilding}
 						<div class="progress-container">
 							<p>{t('ui.preview_building')}</p>
 							<ProgressBar progress={buildProgress} />
 						</div>
-					{:else}
-						<button
-							class="action-button preview-button"
-							on:click={startPreview}
-							disabled={currentContents.length === 0}
-						>
-							{hasPreview ? t('ui.regenerate_preview') : t('ui.generate_preview')}
-						</button>
-					{/if}
-
-					{#if hasPreview && previewUrl}
+					{:else if hasPreview && previewUrl}
 						<div class="preview-link">
-							<p>{t('ui.preview_link')}</p>
+							<p class="section-label">{t('ui.preview_link')}</p>
 							<a href={previewUrl} target="_blank" class="preview-url">{previewUrl}</a>
 							<div class="preview-actions">
+								<button
+									class="action-button preview-button"
+									on:click={startPreview}
+									disabled={currentContents.length === 0}
+								>
+									{t('ui.regenerate_preview')}
+								</button>
 								<button
 									class="action-button export-button"
 									on:click={exportSite}
@@ -1920,20 +1992,16 @@
 								</button>
 							</div>
 						</div>
+					{:else}
+						<p class="field-hint">{t('ui.preview_hint')}</p>
+						<button
+							class="action-button preview-button"
+							on:click={startPreview}
+							disabled={currentContents.length === 0}
+						>
+							{t('ui.generate_preview')}
+						</button>
 					{/if}
-
-					<label class="auto-publish-toggle preview-realtime-toggle">
-						<input
-							type="checkbox"
-							class="toggle-checkbox"
-							bind:checked={autoPublishEnabled}
-							on:change={handleAutoPublishToggle}
-						/>
-						<span class="toggle-label">{t('ui.realtime_publish')}</span>
-					</label>
-					<p class="field-hint preview-realtime-hint">
-						{t('ui.realtime_publish_hint')}
-					</p>
 				</div>
 			{/if}
 		</div>
@@ -2253,7 +2321,20 @@
 	.growth-card-hint {
 		font-size: 12px;
 		color: var(--text-muted);
-		margin: 0 0 10px;
+		margin: 0 0 8px;
+		line-height: 1.45;
+	}
+
+	.growth-benefits {
+		margin: 0 0 12px;
+		padding-left: 1.1rem;
+		font-size: 12px;
+		color: var(--text-normal);
+		line-height: 1.55;
+	}
+
+	.growth-benefits li {
+		margin-bottom: 2px;
 	}
 
 	.growth-sign-in-btn {
@@ -2417,8 +2498,31 @@
 		gap: 12px;
 	}
 
+	.publish-auto-toggle {
+		margin-left: 0;
+		flex-shrink: 0;
+	}
+
+	.publish-auto-block {
+		margin-left: auto;
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 4px;
+		max-width: 52%;
+	}
+
+	.publish-auto-hint {
+		margin: 0;
+		font-size: 11px;
+		line-height: 1.35;
+		color: var(--text-muted);
+		text-align: right;
+	}
+
 	.quick-publish-btn {
-		flex: 0 0 140px;
+		flex: 0 1 auto;
+		min-width: 120px;
 		padding: 10px 16px;
 		border: none;
 		border-radius: 4px;

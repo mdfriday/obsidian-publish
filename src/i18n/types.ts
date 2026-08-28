@@ -324,8 +324,10 @@ export interface TranslationNamespace {
 		// Preview section
 		preview: string;
 		preview_building: string;
+		preview_preparing: string;
 		preview_success: string;
 		preview_failed: string;
+		preview_hint: string;
 		generate_preview: string;
 		regenerate_preview: string;
 		preview_link: string;
@@ -352,8 +354,16 @@ export interface TranslationNamespace {
 		publish_prepare_waiting: string;
 		growth_title_success: string;
 		growth_guest_keep: string;
+		growth_guest_lead: string;
+		growth_guest_benefit_keep: string;
+		growth_guest_benefit_same_url: string;
+		growth_guest_benefit_projects: string;
 		growth_guest_expiry: string;
 		growth_upgrade_title: string;
+		growth_upgrade_lead: string;
+		growth_upgrade_benefit_domain: string;
+		growth_upgrade_benefit_history: string;
+		growth_upgrade_benefit_storage: string;
 		growth_upgrade_body: string;
 		growth_upgrade_cta: string;
 		growth_whats_next: string;
