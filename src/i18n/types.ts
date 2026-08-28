@@ -345,6 +345,39 @@ export interface TranslationNamespace {
 		publish_failed: string;
 		published_successfully: string;
 
+		// Quick publish — pre-auth & growth
+		publish_prepare_title: string;
+		publish_prepare_body: string;
+		publish_prepare_continue: string;
+		publish_prepare_waiting: string;
+		growth_title_success: string;
+		growth_guest_keep: string;
+		growth_guest_expiry: string;
+		growth_upgrade_title: string;
+		growth_upgrade_body: string;
+		growth_upgrade_cta: string;
+		growth_whats_next: string;
+		growth_change_theme: string;
+		growth_custom_domain: string;
+		growth_analytics: string;
+		growth_comments: string;
+		growth_studio: string;
+		publish_again: string;
+		more_settings: string;
+		theme_catalog_hint: string;
+		preview_ready: string;
+		preview_off: string;
+		realtime_publish_hint: string;
+		current_content: string;
+		open_in_browser: string;
+		open: string;
+		copy_url: string;
+		copy: string;
+		realtime_publishing: string;
+		realtime_publish: string;
+		settings: string;
+		publish_config: string;
+
 		// Server section
 		server_start: string;
 		server_stop: string;

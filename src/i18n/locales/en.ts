@@ -415,11 +415,37 @@ export const en = {
 		copy: "Copy",
 		realtime_publishing: "Realtime Publishing...",
 		realtime_publish: "Realtime publish",
+		realtime_publish_hint: "Automatically rebuild and publish when notes change.",
 		auto_publish: "Auto Publish",
 		stop_publish: "Stop Publishing",
 		stop: "Stop",
 		settings: "Settings",
 		publish_config: "Publish Configuration",
+
+		publish_prepare_title: "Prepare to publish",
+		publish_prepare_body:
+			"We'll open a quick online check (~10 sec). No sign-up needed.",
+		publish_prepare_continue: "Continue",
+		publish_prepare_waiting: "Complete the check in your browser…",
+
+		growth_title_success: "Your site is live",
+		growth_guest_keep: "Sign in to keep your site",
+		growth_guest_expiry: "Guest sites clear at UTC midnight",
+		growth_upgrade_title: "Upgrade for permanent hosting",
+		growth_upgrade_body:
+			"Personal keeps your site, custom domains, and release rollback.",
+		growth_upgrade_cta: "Upgrade…",
+		growth_whats_next: "What's next",
+		growth_change_theme: "Change theme",
+		growth_custom_domain: "Use your own domain",
+		growth_analytics: "Add analytics",
+		growth_comments: "Add comments",
+		growth_studio: "Customize with Studio",
+		publish_again: "Publish again",
+		more_settings: "More settings",
+		theme_catalog_hint: "Browse themes online:",
+		preview_ready: "Ready",
+		preview_off: "Off",
 
 		// Publish section
 		publish: "Publish",

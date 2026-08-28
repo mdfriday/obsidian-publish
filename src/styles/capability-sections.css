@@ -1,0 +1,81 @@
+/* Shared collapsible capability rows (Theme / Domain / History / Preview) */
+
+.site-builder .project-capabilities {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.site-builder .capability-section {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--background-primary);
+  margin-bottom: 0;
+}
+
+.site-builder .capability-section > .subsection-toggle,
+.site-builder .capability-section > button.subsection-toggle {
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.2s;
+  text-align: left;
+  height: auto;
+  min-height: 0;
+}
+
+.site-builder .capability-section > .subsection-toggle:hover,
+.site-builder .capability-section > button.subsection-toggle:hover {
+  background: var(--background-modifier-hover);
+  box-shadow: none;
+}
+
+.site-builder .capability-section .collapse-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.site-builder .capability-section .collapse-icon.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.site-builder .capability-section .setting-item-name {
+  flex: 0 1 auto;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-normal);
+}
+
+.site-builder .capability-summary {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.site-builder .capability-body,
+.site-builder .capability-body-inline {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}

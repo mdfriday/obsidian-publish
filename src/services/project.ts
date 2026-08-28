@@ -254,23 +254,41 @@ export class ProjectServiceManager {
 	// ==================== Cloudflare MDF Key + share baseURL ====================
 
 	/**
-	 * Ensure we have an MDF_… Key (create guest if needed).
-	 * Staging/prod: open hosted Turnstile challenge → deep link token → guest.
-	 *
-	 * Important: if a Key already exists, do NOT re-run auto env probe — that can flip
-	 * auto→local when `npm run local` is up and wipe the staging Personal Key.
+	 * Whether a publish key already exists locally.
 	 */
-	async ensureMdfKey(): Promise<string | null> {
+	hasMdfKey(): boolean {
+		return !!this.plugin.settings.mdfKey;
+	}
+
+	/** Staging/prod guest flow needs Turnstile; local skips it. */
+	needsTurnstileForGuest(): boolean {
+		return (this.plugin.settings.cloudflareResolvedEnv || 'local') !== 'local';
+	}
+
+	/**
+	 * Ensure we have an MDF_… Key.
+	 * @param interactive false = do not open browser / create guest (Quick Publish pre-step)
+	 */
+	async ensureMdfKey(opts?: { interactive?: boolean }): Promise<string | null> {
 		const foundry = this.plugin.foundryPublishService;
 		if (this.plugin.settings.mdfKey) {
-			// Keep ControlPlane URL in sync with current settings (no auto re-probe).
 			foundry?.applyCloudflareEndpoints({
 				apiBaseUrl: this.plugin.settings.cloudflareApiBaseUrl,
 				publicBaseUrl: this.plugin.settings.cloudflarePublicBaseUrl,
 			});
 			return this.plugin.settings.mdfKey;
 		}
+		if (opts?.interactive === false) {
+			return null;
+		}
+		return this.requestGuestKey();
+	}
 
+	/**
+	 * Create guest MDF Key (Turnstile on staging/prod). Call after user confirms in-panel.
+	 */
+	async requestGuestKey(): Promise<string | null> {
+		const foundry = this.plugin.foundryPublishService;
 		await this.plugin.applyCloudflareEnv({ persist: true });
 
 		if (!foundry) return null;
@@ -315,7 +333,7 @@ export class ProjectServiceManager {
 	 * Prefer persisted MDF Key (guest or user after claim).
 	 */
 	async resolveAuthToken(): Promise<{ token: string; kind: 'user' | 'guest' } | null> {
-		const key = await this.ensureMdfKey();
+		const key = await this.ensureMdfKey({ interactive: false });
 		if (!key) return null;
 		const kind = this.plugin.settings.mdfKeyKind === 'user' ? 'user' : 'guest';
 		return { token: key, kind };
@@ -453,7 +471,7 @@ export class ProjectServiceManager {
 
 		const auth = await this.resolveAuthToken();
 		if (!auth) {
-			return { error: 'Failed to create guest session' };
+			return { error: 'Publish key required — complete verification in the panel first' };
 		}
 
 		const publicBaseUrl =

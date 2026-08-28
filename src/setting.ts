@@ -255,11 +255,8 @@ export class FridaySettingTab extends PluginSettingTab {
 			)
 			.addButton((btn) => {
 				btn.setButtonText('Manage…');
-				btn.onClick(async () => {
-					const { CloudflareProjectsModal } = await import(
-						'./projects/cloudflareProjectsModal'
-					);
-					new CloudflareProjectsModal(this.app, this.plugin).open();
+				btn.onClick(() => {
+					void this.plugin.openCloudflareProjectsModal();
 				});
 			});
 

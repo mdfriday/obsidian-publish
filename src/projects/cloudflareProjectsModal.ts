@@ -69,19 +69,34 @@ export class CloudflareProjectsModal extends SuggestModal<CloudflareRemoteProjec
 	}
 
 	renderSuggestion(p: CloudflareRemoteProjectRow, el: HTMLElement) {
-		el.createDiv({ text: p.title || p.siteId || p.id });
+		const displayTitle = p.title?.trim() || p.siteId || 'Untitled site';
+		el.createDiv({ text: displayTitle });
 		const meta = el.createDiv({ cls: 'setting-item-description' });
 		const domainLine = this.formatDomainLine(p);
-		const mode = p.hostingMode || 'share';
+		const mode =
+			p.hostingMode === 'custom'
+				? 'Custom domain'
+				: p.hostingMode === 'share'
+					? 'Share link'
+					: p.hostingMode || 'Share link';
+		const status = this.formatStatus(p.status);
 		const exp =
 			p.expiresAt != null
 				? ` · expires ${new Date(p.expiresAt).toISOString().slice(0, 10)}`
 				: '';
 		meta.setText(
 			domainLine
-				? `${domainLine} · ${mode} · ${p.status || '—'}${exp}`
-				: `no custom domain · ${mode} · ${p.status || '—'}${exp}`,
+				? `${domainLine} · ${mode} · ${status}${exp}`
+				: `No custom domain · ${mode} · ${status}${exp}`,
 		);
+	}
+
+	private formatStatus(status?: string): string {
+		const s = (status || '').toLowerCase();
+		if (s === 'live' || s === 'active') return 'Live';
+		if (s === 'draft') return 'Draft';
+		if (s === 'provisioning' || s === 'pending') return 'Setting up domain…';
+		return status || '—';
 	}
 
 	private formatDomainLine(p: CloudflareRemoteProjectRow): string | null {

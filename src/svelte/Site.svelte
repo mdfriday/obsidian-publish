@@ -2,6 +2,8 @@
 	import {App, Notice, TFolder, TFile, FileSystemAdapter, requestUrl} from "obsidian";
 	import FridayPlugin from "../main";
 	import ProgressBar from "./ProgressBar.svelte";
+	import DomainSection from "./DomainSection.svelte";
+	import HistorySection from "./HistorySection.svelte";
 	import {onMount, onDestroy, tick} from "svelte";
 	import type { PublishMethod } from "../types/publish";
 	import { normalizePublishMethod } from "../types/publish";
@@ -11,6 +13,7 @@
 	import {GetBaseUrl} from "../main";
 	import {createStyleRenderer, OBStyleRenderer} from "../markdown";
 	import {themeApiService} from "../theme/themeApiService";
+	import type { ThemeItem } from "../theme/types";
 	import type { ProjectState, ProgressUpdate, PublishProgressUpdate } from "../types/events";
 	import { DEFAULT_THEMES, shouldUseInternalRenderer } from "../utils/theme";
 
@@ -103,22 +106,15 @@
 	let publishSuccess = false;
 	let publishUrl = '';
 	let selectedPublishOption: PublishMethod = normalizePublishMethod();
-	
-	// Netlify configuration (project-specific)
-	let netlifyAccessToken = '';
-	let netlifyProjectId = '';
-	
-	// FTP configuration (project-specific)
-	let ftpServer = '';
-	let ftpUsername = '';
-	let ftpPassword = '';
-	let ftpRemoteDir = '';
-	let ftpIgnoreCert = true;
-	let ftpPreferredSecure: boolean | undefined = undefined; // Remember last successful connection type
-	
-	// FTP test connection state
-	let ftpTestState: 'idle' | 'testing' | 'success' | 'error' = 'idle';
-	let ftpTestMessage = '';
+
+	/** Pre-auth: show inline before opening Turnstile browser */
+	let authPrepareStep: 'idle' | 'prepare' | 'waiting' = 'idle';
+
+	/** Collapsible project capability sections */
+	let showThemeSection = false;
+	let showPreviewSection = false;
+	let themeList: ThemeItem[] = [];
+	let themesLoading = false;
 
 	// Export related state
 	let isExporting = false;
@@ -316,33 +312,8 @@
 
 			// 3. Load publish configuration
 			if (state.config.publish) {
-				// Load publish method
 				if (state.config.publish.method) {
 					selectedPublishOption = normalizePublishMethod(state.config.publish.method);
-				}
-				
-				// Load FTP configuration
-				if (state.config.publish.ftp) {
-					ftpServer = state.config.publish.ftp.host || '';
-					ftpUsername = state.config.publish.ftp.username || '';
-					ftpPassword = state.config.publish.ftp.password || '';
-					ftpRemoteDir = state.config.publish.ftp.remotePath || '';
-					
-					// Load secure preference (new API)
-					if (state.config.publish.ftp.secure !== undefined) {
-						ftpPreferredSecure = state.config.publish.ftp.secure;
-					}
-					
-					// Backward compatibility: also check old ignoreCert field
-					if (state.config.publish.ftp.ignoreCert !== undefined) {
-						ftpIgnoreCert = state.config.publish.ftp.ignoreCert;
-					}
-				}
-
-				// Load Netlify configuration
-				if (state.config.publish.netlify) {
-					netlifyAccessToken = state.config.publish.netlify.accessToken || '';
-					netlifyProjectId = state.config.publish.netlify.siteId || '';
 				}
 			}
 
@@ -548,6 +519,7 @@
 		publishProgress = 100;
 		isPublishing = false;
 		publishSuccess = true;
+		authPrepareStep = 'idle';
 
 		publishUrl = buildPublishUrl(result.url || '');
 		if (result.baseURL) {
@@ -555,6 +527,8 @@
 		}
 		if (publishUrl) {
 			persistLastPublishUrl(publishUrl);
+			plugin.settings.hasPublishedOnce = true;
+			void plugin.saveSettings();
 			new Notice(t('messages.site_published_successfully'), 5000);
 		}
 	}
@@ -621,16 +595,12 @@
 			startPreviewAndWait,
 			startPublish,
 			clearAllContent,
-			selectMDFShare,
-			selectMDFFree,
-			selectMDFApp,
-			selectMDFCustom,
-			selectMDFEnterprise,
-			selectNetlify,
-			selectFTP,
+			openAccountFromGrowth,
 			enableAutoPublish
 		});
 		}
+
+		await loadThemeList();
 
 		// Notify Main.ts that component is ready
 		if (plugin.handleSiteEvent && plugin.currentProjectName) {
@@ -655,15 +625,89 @@
 			return false;
 		}
 	}
-	
-	// Legacy no-ops — publish is always Cloudflare
-	function selectMDFShare() {}
-	function selectMDFFree() {}
-	function selectMDFApp() {}
-	function selectMDFCustom() {}
-	function selectMDFEnterprise() {}
-	function selectNetlify() {}
-	function selectFTP() {}
+
+	async function openAccountFromGrowth() {
+		await plugin.openAccountInBrowser();
+	}
+
+	function needsGuestKeySetup(): boolean {
+		const mgr = plugin.projectServiceManager;
+		return !!mgr?.needsTurnstileForGuest() && !plugin.settings.mdfKey;
+	}
+
+	async function continueGuestKeySetup() {
+		const mgr = plugin.projectServiceManager;
+		if (!mgr) return;
+		authPrepareStep = 'waiting';
+		const key = await mgr.requestGuestKey();
+		authPrepareStep = 'idle';
+		if (key) {
+			await runPublish();
+		}
+	}
+
+	function cancelGuestKeySetup() {
+		authPrepareStep = 'idle';
+	}
+
+	function onDomainActive(hostname: string) {
+		publishUrl = `https://${hostname.replace(/\/$/, '')}/`;
+		publishSuccess = true;
+		sitePath = '/';
+		void persistLastPublishUrl(publishUrl);
+		void saveFoundryConfig('baseURL', '/');
+	}
+
+	async function loadThemeList() {
+		themesLoading = true;
+		try {
+			themeList = await themeApiService.getAllThemes(plugin);
+		} catch (error) {
+			console.warn('[Site] Failed to load themes:', error);
+			themeList = [];
+		} finally {
+			themesLoading = false;
+		}
+	}
+
+	async function applyThemeById(themeId: string) {
+		const theme = themeList.find((item) => item.id === themeId);
+		if (!theme) return;
+
+		selectedThemeDownloadUrl = theme.download_url;
+		selectedThemeName = theme.title || theme.name;
+		selectedThemeId = theme.id;
+		userHasSelectedTheme = true;
+
+		await saveFoundryConfig('module.imports.0.path', theme.download_url);
+
+		try {
+			currentThemeWithSample = theme;
+			if (theme.tags) {
+				const useInternalRenderer = shouldUseInternalRenderer(theme.tags);
+				await saveFoundryConfig('markdown.useInternalRenderer', useInternalRenderer);
+			}
+		} catch (error) {
+			console.warn('Failed to apply theme metadata:', error);
+		}
+	}
+
+	function openThemesCatalog() {
+		window.open('https://mdfriday.com/themes', '_blank');
+	}
+
+	$: displaySiteTitle = siteName || plugin.currentProjectName || 'MDFriday';
+	$: isGuestKey = !plugin.settings.mdfKeyKind || plugin.settings.mdfKeyKind === 'guest';
+	$: planLower = (plugin.settings.mdfKeyPlan || plugin.settings.mdfKeyKind || '').toLowerCase();
+	$: showUpgradeCard =
+		!!publishUrl &&
+		(isGuestKey || planLower === 'guest' || planLower === 'free');
+	$: upgradeCardTitle = isGuestKey || planLower === 'guest'
+		? t('ui.growth_guest_keep')
+		: t('ui.growth_upgrade_title');
+	$: upgradeCardBody = isGuestKey || planLower === 'guest'
+		? t('ui.growth_guest_expiry')
+		: t('ui.growth_upgrade_body');
 	
 	// Enable auto-publish mode (called from main.ts for quick publish)
 	export function enableAutoPublish() {
@@ -778,18 +822,6 @@
 		// Reset language config save state
 		lastSavedLanguageConfig = '';
 		isSavingLanguageConfig = false;
-		
-		// 清空发布配置
-		netlifyAccessToken = '';
-		netlifyProjectId = '';
-		ftpServer = '';
-		ftpUsername = '';
-		ftpPassword = '';
-		ftpRemoteDir = '';
-		ftpIgnoreCert = true;
-		ftpPreferredSecure = undefined;
-		ftpTestState = 'idle';
-		ftpTestMessage = '';
 	}
 
 	// 监听语言内容变化，自动保存语言配置
@@ -1053,114 +1085,6 @@
 		publishProgress = 0;
 		publishSuccess = false;
 		publishUrl = '';
-	}
-	
-	/**
-	 * Build publish config for MDFriday Free
-	 */
-	async function buildMDFFreePublishConfig(_projectName: string) {
-		// M1: Free → Cloudflare V2 guest
-		return {
-			method: 'cloudflare' as const,
-			config: undefined as any,
-		};
-	}
-	
-	/**
-	 * Build publish config for MDFriday Share
-	 */
-	async function buildMDFSharePublishConfig(_projectName: string) {
-		// M1: Share → Cloudflare V2 guest (same path as Free)
-		return {
-			method: 'cloudflare' as const,
-			config: undefined as any,
-		};
-	}
-	
-	/**
-	 * Build publish config for MDFriday App (custom subdomain)
-	 */
-	function buildMDFAppPublishConfig() {
-		return {
-			method: 'mdfriday' as const,
-			config: {
-				type: 'mdfriday',
-				deploymentType: 'sub',
-				path: sitePath,
-				enabled: true,
-				accessToken: plugin.licenseState?.getAccessToken() || '',
-				licenseKey: plugin.licenseState?.getLicenseKey() || '',
-				apiUrl: plugin.licenseState?.getApiUrl() || GetBaseUrl(plugin.settings)
-			}
-		};
-	}
-	
-	/**
-	 * Build publish config for MDFriday Custom Domain
-	 */
-	function buildMDFCustomPublishConfig() {
-		return {
-			method: 'mdfriday' as const,
-			config: {
-				type: 'mdfriday',
-				deploymentType: 'custom',
-				path: sitePath,
-				enabled: true,
-				accessToken: plugin.licenseState?.getAccessToken() || '',
-				licenseKey: plugin.licenseState?.getLicenseKey() || '',
-				apiUrl: plugin.licenseState?.getApiUrl() || GetBaseUrl(plugin.settings)
-			}
-		};
-	}
-	
-	/**
-	 * Build publish config for MDFriday Enterprise
-	 */
-	function buildMDFEnterprisePublishConfig() {
-		return {
-			method: 'mdfriday' as const,
-			config: {
-				type: 'mdfriday',
-				deploymentType: 'enterprise',
-				path: sitePath,
-				enabled: true,
-				accessToken: plugin.licenseState?.getAccessToken() || '',
-				licenseKey: plugin.licenseState?.getLicenseKey() || '',
-				apiUrl: plugin.licenseState?.getApiUrl() || GetBaseUrl(plugin.settings)
-			}
-		};
-	}
-	
-	/**
-	 * Build publish config for Netlify
-	 */
-	function buildNetlifyPublishConfig() {
-		return {
-			method: 'netlify' as const,
-			config: {
-				type: 'netlify',
-				accessToken: netlifyAccessToken,
-				siteId: netlifyProjectId
-			}
-		};
-	}
-	
-	/**
-	 * Build publish config for FTP
-	 */
-	function buildFTPPublishConfig() {
-		return {
-			method: 'ftp' as const,
-			config: {
-				type: 'ftp',
-				host: ftpServer,
-				port: 21,
-				username: ftpUsername,
-				password: ftpPassword,
-				remotePath: ftpRemoteDir || '/',
-				secure: ftpPreferredSecure !== undefined ? ftpPreferredSecure : true
-			}
-		};
 	}
 
 	async function createRendererBasedOnTheme() {
@@ -1432,22 +1356,7 @@
 		new Notice(t('messages.publish_stopped') || 'Publishing stopped', 2000);
 	}
 
-	async function startPublish() {
-		if (autoPublishEnabled) {
-			await autoPublish();
-			return;
-		}
-
-		if (currentContents.length === 0) {
-			new Notice(t('messages.no_folder_or_file_selected'), 3000);
-			return;
-		}
-
-		if (!plugin.currentProjectName) {
-			new Notice('No project selected. Please right-click a folder first.', 3000);
-			return;
-		}
-
+	async function runPublish() {
 		resetPublishState();
 
 		try {
@@ -1472,73 +1381,42 @@
 		}
 	}
 
+	async function startPublish() {
+		if (autoPublishEnabled) {
+			await autoPublish();
+			return;
+		}
+
+		if (currentContents.length === 0) {
+			new Notice(t('messages.no_folder_or_file_selected'), 3000);
+			return;
+		}
+
+		if (!plugin.currentProjectName) {
+			new Notice('No project selected. Please right-click a folder first.', 3000);
+			return;
+		}
+
+		const mgr = plugin.projectServiceManager;
+		if (!plugin.settings.mdfKey && mgr) {
+			if (mgr.needsTurnstileForGuest()) {
+				authPrepareStep = 'prepare';
+				return;
+			}
+			authPrepareStep = 'waiting';
+			const key = await mgr.requestGuestKey();
+			authPrepareStep = 'idle';
+			if (!key) return;
+		}
+
+		await runPublish();
+	}
+
 	// Handle auto-publish toggle change (only save when user manually toggles)
 	function handleAutoPublishToggle() {
 		if (plugin.currentProjectName && !plugin.isProjectInitializing) {
 			saveFoundryConfig('params.autoPublish', autoPublishEnabled);
 		}
-	}
-
-	// Test FTP connection
-	async function testFTPConnection() {
-		// Check if Project Service Manager is available
-		if (!plugin.projectServiceManager) {
-			ftpTestState = 'error';
-			ftpTestMessage = 'Project service manager not initialized';
-			return;
-		}
-		
-		// Validate that we have a project to test with
-		if (!plugin.currentProjectName) {
-			ftpTestState = 'error';
-			ftpTestMessage = 'No project selected. Please right-click a folder first.';
-			return;
-		}
-		
-		ftpTestState = 'testing';
-		ftpTestMessage = '';
-		
-		try {
-			// Prepare FTP configuration
-			const ftpConfig = {
-				type: 'ftp',
-				host: ftpServer,
-				username: ftpUsername,
-				password: ftpPassword,
-				remotePath: ftpRemoteDir || '/',
-				secure: ftpPreferredSecure !== undefined ? ftpPreferredSecure : true,
-			};
-			
-			// Use Project Service Manager to test connection
-			const result = await plugin.projectServiceManager.testConnection(
-				plugin.currentProjectName,
-				ftpConfig
-			);
-			
-			if (result.success) {
-				ftpTestState = 'success';
-				ftpTestMessage = result.message || t('settings.ftp_test_connection_success');
-			} else {
-				ftpTestState = 'error';
-				ftpTestMessage = result.error || result.message || t('settings.ftp_test_connection_failed');
-			}
-		} catch (error) {
-			console.error('FTP test error:', error);
-			ftpTestState = 'error';
-			ftpTestMessage = error.message || t('settings.ftp_test_connection_failed');
-		}
-	}
-
-	// Track FTP config changes to reset test state
-	let previousFtpConfig = '';
-	$: {
-		const currentFtpConfig = `${ftpServer}|${ftpUsername}|${ftpPassword}|${ftpRemoteDir}|${ftpIgnoreCert}`;
-		if (previousFtpConfig && previousFtpConfig !== currentFtpConfig && ftpTestState !== 'idle') {
-			// Config changed while test result is showing, reset to idle
-			ftpTestState = 'idle';
-			ftpTestMessage = '';
-		}
-		previousFtpConfig = currentFtpConfig;
 	}
 
 	async function createThemesDirectory() {
@@ -1811,9 +1689,28 @@
 		<div class="panel-header">
 			<div class="panel-header-left">
 				<img src="https://gohugo.net/mdfriday.svg" alt="MDFriday" class="mdfriday-logo" width="20" height="20" />
-				<span class="panel-title">MDFriday</span>
+				<span class="panel-title">{displaySiteTitle}</span>
 			</div>
 		</div>
+
+		{#if authPrepareStep === 'prepare'}
+			<div class="auth-prepare-card">
+				<div class="auth-prepare-title">{t('ui.publish_prepare_title')}</div>
+				<p class="auth-prepare-body">{t('ui.publish_prepare_body')}</p>
+				<div class="auth-prepare-actions">
+					<button class="mod-cta auth-prepare-continue" on:click={continueGuestKeySetup}>
+						{t('ui.publish_prepare_continue')}
+					</button>
+					<button class="auth-prepare-cancel" on:click={cancelGuestKeySetup}>
+						{t('common.cancel')}
+					</button>
+				</div>
+			</div>
+		{:else if authPrepareStep === 'waiting'}
+			<div class="auth-prepare-card auth-prepare-waiting">
+				<div class="auth-prepare-title">{t('ui.publish_prepare_waiting')}</div>
+			</div>
+		{/if}
 
 		<!-- Current Content Display -->
 		<div class="current-content">
@@ -1853,7 +1750,7 @@
 			{:else if publishSuccess && publishUrl}
 				<!-- Published successfully with URL -->
 				<div class="status-success">
-					<div class="status-text success">✓ {t('ui.published_successfully')}</div>
+					<div class="status-text success">✓ {t('ui.growth_title_success')}</div>
 					<a href={publishUrl} target="_blank" class="publish-url-display">{publishUrl}</a>
 					<div class="url-actions">
 						<button class="url-action-btn" on:click={openPublishUrl} title={t('ui.open_in_browser') || 'Open in browser'}>
@@ -1873,6 +1770,16 @@
 						</button>
 					</div>
 				</div>
+
+				{#if showUpgradeCard}
+					<div class="growth-card">
+						<div class="growth-card-title">{upgradeCardTitle}</div>
+						<p class="growth-card-hint">{upgradeCardBody}</p>
+						<button class="mod-cta growth-sign-in-btn" on:click={openAccountFromGrowth}>
+							{isGuestKey || planLower === 'guest' ? t('settings.login') : t('ui.growth_upgrade_cta')}
+						</button>
+					</div>
+				{/if}
 			{/if}
 		</div>
 
@@ -1897,24 +1804,142 @@
 				<button
 					class="quick-publish-btn"
 					on:click={startPublish}
-					disabled={currentContents.length === 0 || isPublishing || isBuilding}
+					disabled={currentContents.length === 0 || isPublishing || isBuilding || authPrepareStep === 'waiting'}
 				>
-					{t('ui.publish')}
+					{publishUrl ? (t('ui.publish_again') || 'Publish again') : t('ui.publish')}
 				</button>
 			{/if}
-			<label class="auto-publish-toggle">
-				<input
-					type="checkbox"
-					class="toggle-checkbox"
-					bind:checked={autoPublishEnabled}
-					on:change={handleAutoPublishToggle}
-				/>
-				<span class="toggle-label">{t('ui.realtime_publish') || 'Realtime publish'}</span>
-			</label>
 		</div>
 	</div>
 
-	<!-- Settings Panel (Collapsible) -->
+	<!-- Project capabilities -->
+	<div class="project-capabilities">
+		<div class="capability-section">
+			<button
+				type="button"
+				class="subsection-toggle"
+				on:click={() => showThemeSection = !showThemeSection}
+				aria-expanded={showThemeSection}
+			>
+				<svg class="collapse-icon" class:is-collapsed={!showThemeSection} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<polyline points="6 9 12 15 18 9"></polyline>
+				</svg>
+				<span class="setting-item-name">{t('ui.theme')}</span>
+				<span class="capability-summary">{displayThemeName}</span>
+			</button>
+			{#if showThemeSection}
+				<div class="capability-body-inline">
+					<select
+						class="form-select theme-select"
+						value={selectedThemeId}
+						disabled={themesLoading}
+						on:change={(e) => applyThemeById(e.currentTarget.value)}
+					>
+						{#if themesLoading && themeList.length === 0}
+							<option value={selectedThemeId}>{displayThemeName}</option>
+						{:else}
+							{#each themeList as theme (theme.id)}
+								<option value={theme.id}>{theme.title || theme.name}</option>
+							{/each}
+						{/if}
+					</select>
+					<p class="field-hint">
+						{t('ui.theme_catalog_hint')}
+						<button type="button" class="link-button" on:click={openThemesCatalog}>
+							mdfriday.com/themes
+						</button>
+					</p>
+					{#if currentThemeWithSample?.demo_notes_url}
+						{#if isDownloadingSample}
+							<div class="sample-download-progress">
+								<span class="progress-text">{t('ui.downloading_sample')}</span>
+								<ProgressBar progress={sampleDownloadProgress} />
+							</div>
+						{:else}
+							<button class="action-button" on:click={downloadThemeSample}>
+								{t('ui.download_sample')}
+							</button>
+						{/if}
+					{/if}
+				</div>
+			{/if}
+		</div>
+
+		<DomainSection
+			{plugin}
+			projectName={plugin.currentProjectName || projectName}
+			onDomainActive={onDomainActive}
+		/>
+
+		<HistorySection
+			{plugin}
+			projectName={plugin.currentProjectName || projectName}
+		/>
+
+		<div class="capability-section">
+			<button
+				type="button"
+				class="subsection-toggle"
+				on:click={() => showPreviewSection = !showPreviewSection}
+				aria-expanded={showPreviewSection}
+			>
+				<svg class="collapse-icon" class:is-collapsed={!showPreviewSection} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<polyline points="6 9 12 15 18 9"></polyline>
+				</svg>
+				<span class="setting-item-name">{t('ui.preview')}</span>
+				<span class="capability-summary">{hasPreview ? (t('ui.preview_ready') || 'Ready') : (t('ui.preview_off') || 'Off')}</span>
+			</button>
+			{#if showPreviewSection}
+				<div class="capability-body-inline">
+					{#if isBuilding}
+						<div class="progress-container">
+							<p>{t('ui.preview_building')}</p>
+							<ProgressBar progress={buildProgress} />
+						</div>
+					{:else}
+						<button
+							class="action-button preview-button"
+							on:click={startPreview}
+							disabled={currentContents.length === 0}
+						>
+							{hasPreview ? t('ui.regenerate_preview') : t('ui.generate_preview')}
+						</button>
+					{/if}
+
+					{#if hasPreview && previewUrl}
+						<div class="preview-link">
+							<p>{t('ui.preview_link')}</p>
+							<a href={previewUrl} target="_blank" class="preview-url">{previewUrl}</a>
+							<div class="preview-actions">
+								<button
+									class="action-button export-button"
+									on:click={exportSite}
+									disabled={isExporting}
+								>
+									{isExporting ? t('ui.exporting') : t('ui.export_site')}
+								</button>
+							</div>
+						</div>
+					{/if}
+
+					<label class="auto-publish-toggle preview-realtime-toggle">
+						<input
+							type="checkbox"
+							class="toggle-checkbox"
+							bind:checked={autoPublishEnabled}
+							on:change={handleAutoPublishToggle}
+						/>
+						<span class="toggle-label">{t('ui.realtime_publish')}</span>
+					</label>
+					<p class="field-hint preview-realtime-hint">
+						{t('ui.realtime_publish_hint')}
+					</p>
+				</div>
+			{/if}
+		</div>
+	</div>
+
+	<!-- More settings (Collapsible) -->
 	<div class="settings-panel">
 		<button 
 			class="panel-toggle setting-item-control" 
@@ -1924,7 +1949,7 @@
 			<svg class="collapse-icon" class:is-collapsed={!showSettingsPanel} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 				<polyline points="6 9 12 15 18 9"></polyline>
 			</svg>
-			<span class="setting-item-name">{t('ui.settings') || 'Settings'}</span>
+			<span class="setting-item-name">{t('ui.more_settings') || 'More settings'}</span>
 		</button>
 		
 		{#if showSettingsPanel}
@@ -1998,70 +2023,6 @@
 						on:blur={() => saveFoundryConfig('title', siteName)}
 						placeholder={t('ui.site_name_placeholder')}
 					/>
-				</div>
-
-				<!-- Theme Selection -->
-				<div class="settings-section">
-					<label class="section-label" for="themes">{t('ui.theme')}</label>
-					<div class="theme-selector">
-						<div class="current-theme">
-							<span class="theme-name">{displayThemeName}</span>
-							<div class="theme-actions">
-								<button class="change-theme-btn" on:click={openThemeModal}>
-									{t('ui.change_theme')}
-								</button>
-								{#if currentThemeWithSample && currentThemeWithSample.demo_notes_url}
-									{#if isDownloadingSample}
-										<div class="sample-download-progress">
-											<span class="progress-text">{t('ui.downloading_sample')}</span>
-											<ProgressBar progress={sampleDownloadProgress} />
-										</div>
-									{:else}
-										<button class="download-sample-btn" on:click={downloadThemeSample}>
-											{t('ui.download_sample')}
-										</button>
-									{/if}
-								{/if}
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- Preview Section -->
-				<div class="settings-section">
-					<h3 class="section-title">{t('ui.preview')}</h3>
-					<div class="preview-section">
-						{#if isBuilding}
-							<div class="progress-container">
-								<p>{t('ui.preview_building')}</p>
-								<ProgressBar progress={buildProgress} />
-							</div>
-						{:else}
-							<button
-								class="action-button preview-button"
-								on:click={startPreview}
-								disabled={currentContents.length === 0}
-							>
-								{hasPreview ? t('ui.regenerate_preview') : t('ui.generate_preview')}
-							</button>
-						{/if}
-
-						{#if hasPreview && previewUrl}
-							<div class="preview-link">
-								<p>{t('ui.preview_link')}</p>
-								<a href={previewUrl} target="_blank" class="preview-url">{previewUrl}</a>
-								<div class="preview-actions">
-									<button
-										class="action-button export-button"
-										on:click={exportSite}
-										disabled={isExporting}
-									>
-										{isExporting ? t('ui.exporting') : t('ui.export_site')}
-									</button>
-								</div>
-							</div>
-						{/if}
-					</div>
 				</div>
 
 				<!-- Publish Configuration -->
@@ -2220,7 +2181,114 @@
 		font-size: 16px;
 		font-weight: 600;
 		color: var(--text-normal);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
+
+	.auth-prepare-card {
+		margin-bottom: 16px;
+		padding: 12px 14px;
+		background: var(--mdf-primary-soft, var(--background-secondary));
+		border: 1px solid var(--mdf-border, var(--background-modifier-border));
+		border-radius: var(--mdf-radius-sm, 6px);
+	}
+
+	.auth-prepare-title {
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--text-normal);
+		margin-bottom: 6px;
+	}
+
+	.auth-prepare-body {
+		font-size: 13px;
+		color: var(--text-muted);
+		margin: 0 0 12px;
+		line-height: 1.45;
+	}
+
+	.auth-prepare-actions {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+	}
+
+	.auth-prepare-continue {
+		border-color: var(--mdf-primary, var(--interactive-accent)) !important;
+	}
+
+	.auth-prepare-cancel {
+		padding: 6px 12px;
+		border: none;
+		background: transparent;
+		color: var(--text-muted);
+		font-size: 13px;
+		cursor: pointer;
+	}
+
+	.auth-prepare-cancel:hover {
+		color: var(--text-normal);
+	}
+
+	.auth-prepare-waiting .auth-prepare-title {
+		margin-bottom: 0;
+	}
+
+	.growth-card {
+		margin-top: 12px;
+		padding: 12px 14px;
+		background: var(--mdf-primary-soft, var(--background-secondary));
+		border: 1px solid var(--mdf-border, var(--background-modifier-border));
+		border-radius: var(--mdf-radius-sm, 6px);
+	}
+
+	.growth-card-title {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-normal);
+		margin-bottom: 4px;
+	}
+
+	.growth-card-hint {
+		font-size: 12px;
+		color: var(--text-muted);
+		margin: 0 0 10px;
+	}
+
+	.growth-sign-in-btn {
+		width: 100%;
+		margin-bottom: 10px;
+		border-color: var(--mdf-primary, var(--interactive-accent)) !important;
+	}
+
+
+	.preview-realtime-toggle {
+		margin-top: 14px;
+	}
+
+	.preview-realtime-hint {
+		margin-top: 6px;
+		margin-bottom: 0;
+	}
+	.theme-select {
+		width: 100%;
+	}
+
+	.link-button {
+		border: none;
+		background: transparent;
+		color: var(--mdf-primary, var(--interactive-accent));
+		padding: 0;
+		font-size: inherit;
+		cursor: pointer;
+		text-decoration: underline;
+	}
+
+	.growth-sign-in-btn {
+		margin-bottom: 0;
+	}
+
 
 	/* Current Content Display */
 	.current-content {
@@ -3065,66 +3133,6 @@
 		line-height: 1.4;
 	}
 
-	/* FTP Test Connection */
-	.ftp-test-btn {
-		width: 100%;
-		padding: 8px 16px;
-		border: 1px solid var(--interactive-accent);
-		border-radius: 4px;
-		background: transparent;
-		color: var(--interactive-accent);
-		font-size: 13px;
-		font-weight: 500;
-		cursor: pointer;
-		transition: all 0.2s;
-		min-height: 34px;
-	}
-
-	.ftp-test-btn:hover:not(:disabled) {
-		background: var(--interactive-accent);
-		color: var(--text-on-accent);
-	}
-
-	.ftp-test-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.ftp-test-btn.ftp-test-success {
-		background-color: var(--color-green) !important;
-		color: white !important;
-		border-color: var(--color-green) !important;
-	}
-
-	.ftp-test-btn.ftp-test-error {
-		background-color: var(--color-red) !important;
-		color: white !important;
-		border-color: var(--color-red) !important;
-	}
-
-	.ftp-test-result {
-		margin-top: 6px;
-		padding: 6px 10px;
-		border-radius: 3px;
-		font-size: 11px;
-		line-height: 1.4;
-		display: block;
-		width: 100%;
-		box-sizing: border-box;
-	}
-
-	.ftp-test-result-success {
-		background-color: rgba(var(--color-green-rgb), 0.1);
-		color: var(--color-green);
-		border: 1px solid rgba(var(--color-green-rgb), 0.3);
-	}
-
-	.ftp-test-result-error {
-		background-color: rgba(var(--color-red-rgb), 0.1);
-		color: var(--color-red);
-		border: 1px solid rgba(var(--color-red-rgb), 0.3);
-	}
-	
 	/* Panel header layout */
 	.panel-header {
 		display: flex;
@@ -3136,5 +3144,7 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
+		min-width: 0;
+		flex: 1;
 	}
 </style> 

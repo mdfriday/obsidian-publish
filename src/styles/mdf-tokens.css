@@ -1,0 +1,13 @@
+/* MDFriday design tokens — arch/15 appendix B.1 */
+.site-builder,
+.friday-setting-tab,
+.friday-theme-modal,
+.friday-cloudflare-projects-modal {
+  --mdf-primary: #635bff;
+  --mdf-primary-soft: rgba(99, 91, 255, 0.08);
+  --mdf-border: var(--background-modifier-border);
+  --mdf-error: var(--text-error);
+  --mdf-radius-sm: 0.625rem;
+  --mdf-radius-md: 0.75rem;
+  --mdf-accent: var(--interactive-accent, var(--mdf-primary));
+}

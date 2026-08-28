@@ -54,6 +54,8 @@ interface FridaySettings {
 	mdfQuotaRetentionDays: number | null;
 	mdfQuotaMaxCustomDomains: number | null;
 	mdfQuotaFeatures: string[] | null;
+	/** Set after first successful Cloudflare publish (Growth Card) */
+	hasPublishedOnce: boolean;
 	/** @deprecated migrated to mdfKey */
 	cloudflareGuestToken?: string | null;
 	/** @deprecated migrated away — JWT not stored in plugin */
@@ -85,6 +87,7 @@ const DEFAULT_SETTINGS: FridaySettings = {
 	mdfQuotaRetentionDays: null,
 	mdfQuotaMaxCustomDomains: null,
 	mdfQuotaFeatures: null,
+	hasPublishedOnce: false,
 	cloudflareEnv: 'auto',
 	cloudflareResolvedEnv: null,
 	cloudflareApiBaseUrl: 'https://api.fsky.top',
@@ -258,6 +261,8 @@ export default class FridayPlugin extends Plugin {
 		
 		// Import PC-only styles
 		await Promise.all([
+			import('./styles/mdf-tokens.css'),
+			import('./styles/capability-sections.css'),
 			import('./styles/theme-modal.css'),
 			import('./styles/publish-settings.css'),
 			import('./styles/project-modal.css'),
@@ -1544,6 +1549,24 @@ export default class FridayPlugin extends Plugin {
 		
 		// Reset view initialization state
 		this.viewInitialized = false;
+	}
+
+	async openAccountInBrowser(): Promise<void> {
+		const mgr = this.projectServiceManager;
+		if (!mgr) return;
+		const key =
+			this.settings.mdfKey || (await mgr.ensureMdfKey({ interactive: true }));
+		if (!key) return;
+		const base = (this.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account').replace(
+			/\/$/,
+			'',
+		);
+		window.open(`${base}/?key=${encodeURIComponent(key)}`);
+	}
+
+	async openCloudflareProjectsModal(): Promise<void> {
+		const { CloudflareProjectsModal } = await import('./projects/cloudflareProjectsModal');
+		new CloudflareProjectsModal(this.app, this).open();
 	}
 
 	async loadSettings() {
