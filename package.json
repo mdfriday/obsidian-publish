@@ -13,7 +13,8 @@
 		"check": "npm run tsc-check && npm run svelte-check",
 		"lint": "eslint src/",
 		"lint:fix": "eslint src/ --fix",
-		"lint:ci": "eslint src/ --max-warnings=0"
+		"lint:ci": "eslint src/ --max-warnings=0",
+		"verify:theme-config": "node scripts/verify-theme-config.mjs"
 	},
 	"keywords": [
 		"mdfriday",

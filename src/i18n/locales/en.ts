@@ -517,6 +517,7 @@ export const en = {
 		live_demo: "Live Demo",
 		use_it: "Use It",
 		current: "Current",
+		locked: "Locked",
 		free: "Free",
 		starter: "Starter",
 		enjoy: "Enjoy",

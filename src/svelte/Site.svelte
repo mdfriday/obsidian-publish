@@ -13,9 +13,10 @@
 	import {GetBaseUrl} from "../main";
 	import {createStyleRenderer, OBStyleRenderer} from "../markdown";
 	import {themeApiService} from "../theme/themeApiService";
-	import type { ThemeItem } from "../theme/types";
+	import type { CatalogEntry } from "../theme/types";
 	import type { ProjectState, ProgressUpdate, PublishProgressUpdate } from "../types/events";
-	import { DEFAULT_THEMES, shouldUseInternalRenderer } from "../utils/theme";
+	import { buildThemeConfigPatch } from "../theme/theme-config";
+	import { DEFAULT_THEME_SLUGS, shouldUseInternalRenderer } from "../utils/theme";
 
 	// Receive props
 	export let app: App;
@@ -54,9 +55,9 @@
 	
 	// 其他配置保持在本地管理
 	let sitePath = '/';
-	let selectedThemeDownloadUrl: string = DEFAULT_THEMES.QUARTZ.downloadUrl;
-	let selectedThemeName: string = DEFAULT_THEMES.QUARTZ.name;
-	let selectedThemeId: string = DEFAULT_THEMES.QUARTZ.id.toString();
+	let selectedThemeDownloadUrl: string = '';
+	let selectedThemeName: string = 'Quartz';
+	let selectedThemeSlug: string = DEFAULT_THEME_SLUGS.QUARTZ;
 	
 	// 标志用户是否手动选择过主题
 	let userHasSelectedTheme = false;
@@ -66,15 +67,11 @@
 		if (currentContents.length > 0 && !userHasSelectedTheme) {
 			const firstContent = currentContents[0];
 			if (firstContent.file) {
-				// 单文件 - 设置为 Note 主题
-				selectedThemeDownloadUrl = DEFAULT_THEMES.NOTE.downloadUrl;
-				selectedThemeName = DEFAULT_THEMES.NOTE.name;
-				selectedThemeId = DEFAULT_THEMES.NOTE.id.toString();
+				selectedThemeSlug = DEFAULT_THEME_SLUGS.NOTE;
+				selectedThemeName = 'Paper';
 			} else if (firstContent.folder) {
-				// 文件夹 - 设置为 Book 主题
-				selectedThemeDownloadUrl = DEFAULT_THEMES.QUARTZ.downloadUrl;
-				selectedThemeName = DEFAULT_THEMES.QUARTZ.name;
-				selectedThemeId = DEFAULT_THEMES.QUARTZ.id.toString();
+				selectedThemeSlug = DEFAULT_THEME_SLUGS.QUARTZ;
+				selectedThemeName = 'Quartz';
 			}
 		}
 	}
@@ -115,7 +112,7 @@
 	/** Collapsible project capability sections */
 	let showThemeSection = false;
 	let showPreviewSection = false;
-	let themeList: ThemeItem[] = [];
+	let themeList: CatalogEntry[] = [];
 	let themesLoading = false;
 
 	// Export related state
@@ -228,6 +225,9 @@
 				actualValue = {
 					imports: [{ path: value }]
 				};
+			} else if (key === 'theme.catalog') {
+				actualKey = 'theme';
+				actualValue = value;
 			} else if (key === 'services.googleAnalytics.id') {
 				// Save services as a nested object
 				actualKey = 'services';
@@ -255,15 +255,54 @@
 			
 			// Notify Main.ts to save configuration
 			if (plugin.handleSiteEvent) {
-				await plugin.handleSiteEvent('configChanged', {
-					key: actualKey,
-					value: actualValue
-				});
+				if (actualKey === 'theme') {
+					const patch = actualValue as ReturnType<typeof buildThemeConfigPatch>;
+					await plugin.handleSiteEvent('configChanged', { key: 'module', value: patch.module });
+					const existingConfig = await plugin.getFoundryProjectConfigMap(plugin.currentProjectName);
+					const params = { ...(existingConfig['params'] || {}), ...patch.params };
+					await plugin.handleSiteEvent('configChanged', { key: 'params', value: params });
+				} else {
+					await plugin.handleSiteEvent('configChanged', {
+						key: actualKey,
+						value: actualValue
+					});
+				}
 			}
 			
 		} catch (error) {
 			console.error('[Site] Error saving config:', error);
 		}
+	}
+	
+	async function applyThemeFromCatalog(entry: CatalogEntry) {
+		if (!entry.packUrl) {
+			console.warn('[Site] Cannot apply locked theme:', entry.slug);
+			return;
+		}
+		await saveFoundryConfig('theme.catalog', buildThemeConfigPatch(entry));
+		if (entry.tags?.length) {
+			const useInternalRenderer = shouldUseInternalRenderer(entry.tags);
+			await saveFoundryConfig('markdown.useInternalRenderer', useInternalRenderer);
+		}
+	}
+
+	async function resolveThemeFromConfig(config: Record<string, unknown>): Promise<CatalogEntry | null> {
+		const mdfriday = (config.params as { mdfriday?: { family?: string; variant?: string } })?.mdfriday;
+		if (mdfriday?.family && mdfriday?.variant) {
+			const byMeta = await themeApiService.findByFamilyVariant(
+				mdfriday.family,
+				mdfriday.variant,
+				plugin,
+			);
+			if (byMeta) return byMeta;
+		}
+		const imports = (config.module as { imports?: Array<{ path?: string }> })?.imports;
+		const themeUrl = imports?.[0]?.path;
+		if (themeUrl) {
+			const allThemes = await themeApiService.getAllThemes(plugin);
+			return allThemes.find((t) => t.packUrl === themeUrl) ?? null;
+		}
+		return null;
 	}
 
 	/**
@@ -285,31 +324,20 @@
 			}
 
 			// 2. Load theme configuration
-			if (state.config.module?.imports?.[0]?.path) {
-				const themeUrl = state.config.module.imports[0].path;
-				selectedThemeDownloadUrl = themeUrl;
+			const matchedTheme = await resolveThemeFromConfig(state.config);
+			if (matchedTheme) {
+				selectedThemeSlug = matchedTheme.slug;
+				selectedThemeName = matchedTheme.name;
+				selectedThemeDownloadUrl = matchedTheme.packUrl || state.config.module?.imports?.[0]?.path || '';
 				userHasSelectedTheme = true;
-				
-				// Find theme by download URL to get complete theme info
-				try {
-					const allThemes = await themeApiService.getAllThemes(plugin);
-					const matchedTheme = allThemes.find(theme => theme.download_url === themeUrl);
-					
-					if (matchedTheme) {
-						selectedThemeId = matchedTheme.id;
-						selectedThemeName = matchedTheme.title || matchedTheme.name;
-
-						// Ensure markdown.useInternalRenderer is set correctly based on theme tags
-						if (matchedTheme.tags && state.config.markdown?.useInternalRenderer === undefined) {
-							const useInternalRenderer = shouldUseInternalRenderer(matchedTheme.tags);
-							await saveFoundryConfig('markdown.useInternalRenderer', useInternalRenderer);
-						}
-					} else {
-						console.warn('[Site] Theme not found by URL, used fallback:', themeUrl);
-					}
-				} catch (error) {
-					console.error('[Site] Error finding theme by URL:', error);
+				currentThemeWithSample = matchedTheme;
+				if (matchedTheme.tags && state.config.markdown?.useInternalRenderer === undefined) {
+					const useInternalRenderer = shouldUseInternalRenderer(matchedTheme.tags);
+					await saveFoundryConfig('markdown.useInternalRenderer', useInternalRenderer);
 				}
+			} else if (state.config.module?.imports?.[0]?.path) {
+				selectedThemeDownloadUrl = state.config.module.imports[0].path;
+				userHasSelectedTheme = true;
 			}
 
 			// 3. Load publish configuration
@@ -701,26 +729,17 @@
 		}
 	}
 
-	async function applyThemeById(themeId: string) {
-		const theme = themeList.find((item) => item.id === themeId);
-		if (!theme) return;
+	async function applyThemeBySlug(slug: string) {
+		const theme = themeList.find((item) => item.slug === slug);
+		if (!theme || !theme.packUrl) return;
 
-		selectedThemeDownloadUrl = theme.download_url;
-		selectedThemeName = theme.title || theme.name;
-		selectedThemeId = theme.id;
+		selectedThemeDownloadUrl = theme.packUrl;
+		selectedThemeName = theme.name;
+		selectedThemeSlug = theme.slug;
 		userHasSelectedTheme = true;
+		currentThemeWithSample = theme;
 
-		await saveFoundryConfig('module.imports.0.path', theme.download_url);
-
-		try {
-			currentThemeWithSample = theme;
-			if (theme.tags) {
-				const useInternalRenderer = shouldUseInternalRenderer(theme.tags);
-				await saveFoundryConfig('markdown.useInternalRenderer', useInternalRenderer);
-			}
-		} catch (error) {
-			console.warn('Failed to apply theme metadata:', error);
-		}
+		await applyThemeFromCatalog(theme);
 	}
 
 	function openThemesCatalog() {
@@ -989,39 +1008,18 @@
 	}
 
 	function openThemeModal() {
-		// Call plugin method to show theme selection modal
-		plugin.showThemeSelectionModal(selectedThemeId, async (themeUrl: string, themeName?: string, themeId?: string) => {
-			// Force reactive updates by reassigning all variables
-			selectedThemeDownloadUrl = themeUrl;
-			selectedThemeName = themeName || (isForSingleFile ? "Note" : "Quartz");
-			selectedThemeId = themeId || selectedThemeId;
-			
-		// 标记用户已手动选择主题，防止后续自动重置
-		userHasSelectedTheme = true;
-		
-		// Save theme to Foundry config
-		await saveFoundryConfig('module.imports.0.path', themeUrl);
-			
-			// Get theme info to check for sample availability and update markdown renderer config
-			if (themeId) {
-				try {
-					currentThemeWithSample = await themeApiService.getThemeById(themeId, plugin);
-					
-					// Update markdown.useInternalRenderer based on theme tags
-					if (currentThemeWithSample?.tags) {
-						const useInternalRenderer = shouldUseInternalRenderer(currentThemeWithSample.tags);
-						await saveFoundryConfig('markdown.useInternalRenderer', useInternalRenderer);
-					}
-				} catch (error) {
-					console.warn('Failed to get theme info:', error);
-					currentThemeWithSample = null;
-				}
-			}
+		plugin.showThemeSelectionModal(selectedThemeSlug, async (entry) => {
+			selectedThemeSlug = entry.slug;
+			selectedThemeName = entry.name;
+			selectedThemeDownloadUrl = entry.packUrl || '';
+			userHasSelectedTheme = true;
+			currentThemeWithSample = entry;
+			await applyThemeFromCatalog(entry);
 		}, isForSingleFile);
 	}
 
 	async function downloadThemeSample() {
-		if (!currentThemeWithSample || !currentThemeWithSample.demo_notes_url) {
+		if (!currentThemeWithSample || !('demo_notes_url' in currentThemeWithSample) || !currentThemeWithSample.demo_notes_url) {
 			return;
 		}
 
@@ -1082,7 +1080,7 @@
 	}
 
 	// Reactive statement to ensure theme name updates
-	$: displayThemeName = selectedThemeName || DEFAULT_THEMES.QUARTZ.name;
+	$: displayThemeName = selectedThemeName || 'Quartz';
 
 	function toggleAdvancedSettings() {
 		showAdvancedSettings = !showAdvancedSettings;
@@ -1214,7 +1212,7 @@
 			// No need for explicit saveCurrentConfiguration() call
 			
 			// Get theme info to check if we need custom renderer
-			const themeInfo = await themeApiService.getThemeById(selectedThemeId, plugin);
+			const themeInfo = await themeApiService.getThemeBySlug(selectedThemeSlug, plugin);
 			hasOBTag = themeInfo?.tags?.some(tag =>
 				tag.toLowerCase() === 'obsidian'
 			) || false;
@@ -1284,7 +1282,7 @@
 			// No need for explicit saveCurrentConfiguration() call
 			
 			// Get theme info to check if we need custom renderer
-			const themeInfo = await themeApiService.getThemeById(selectedThemeId, plugin);
+			const themeInfo = await themeApiService.getThemeBySlug(selectedThemeSlug, plugin);
 			hasOBTag = themeInfo?.tags?.some(tag =>
 				tag.toLowerCase() === 'obsidian'
 			) || false;
@@ -1395,7 +1393,7 @@
 		resetPublishState();
 
 		try {
-			const themeInfo = await themeApiService.getThemeById(selectedThemeId, plugin);
+			const themeInfo = await themeApiService.getThemeBySlug(selectedThemeSlug, plugin);
 			hasOBTag = themeInfo?.tags?.some(tag =>
 				tag.toLowerCase() === 'obsidian'
 			) || false;
@@ -1900,15 +1898,15 @@
 				<div class="capability-body-inline">
 					<select
 						class="form-select theme-select"
-						value={selectedThemeId}
+						value={selectedThemeSlug}
 						disabled={themesLoading}
-						on:change={(e) => applyThemeById(e.currentTarget.value)}
+						on:change={(e) => applyThemeBySlug(e.currentTarget.value)}
 					>
 						{#if themesLoading && themeList.length === 0}
-							<option value={selectedThemeId}>{displayThemeName}</option>
+							<option value={selectedThemeSlug}>{displayThemeName}</option>
 						{:else}
-							{#each themeList as theme (theme.id)}
-								<option value={theme.id}>{theme.title || theme.name}</option>
+							{#each themeList.filter((t) => t.packUrl) as theme (theme.slug)}
+								<option value={theme.slug}>{theme.name}</option>
 							{/each}
 						{/if}
 					</select>
@@ -1918,7 +1916,7 @@
 							mdfriday.com/themes
 						</button>
 					</p>
-					{#if currentThemeWithSample?.demo_notes_url}
+					{#if currentThemeWithSample && 'demo_notes_url' in currentThemeWithSample && currentThemeWithSample.demo_notes_url}
 						{#if isDownloadingSample}
 							<div class="sample-download-progress">
 								<span class="progress-text">{t('ui.downloading_sample')}</span>

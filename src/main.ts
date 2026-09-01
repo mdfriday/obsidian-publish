@@ -19,7 +19,8 @@ import {LicenseStateManager} from './services/licenseState';
 import {ProjectServiceManager} from './services/project';
 import type {ProjectState, SiteEventData, SiteEventType} from './types/events';
 import {normalizePublishMethod} from './types/publish';
-import {getDefaultTheme, shouldUseInternalRenderer} from './utils/theme';
+import {resolveDefaultTheme, shouldUseInternalRenderer} from './utils/theme';
+import {buildThemeConfigPatch} from './theme/theme-config';
 import {joinPath, joinVaultPath} from './utils/common';
 import {
 	type CloudflareEnvMode,
@@ -1001,8 +1002,8 @@ export default class FridayPlugin extends Plugin {
 		// Determine if this is a folder project
 		const isFolder = folder !== null;
 		
-		// Get default theme based on project type
-		const defaultTheme = getDefaultTheme(isFolder);
+		// Default theme from catalog (Foundry downloads pack from module.imports.path)
+		const defaultEntry = await resolveDefaultTheme(this, isFolder);
 		
 		// Cloudflare V2 guest sites use root baseURL; public URL comes from control plane
 		const baseURL = '/';
@@ -1022,23 +1023,22 @@ export default class FridayPlugin extends Plugin {
 				category: 'categories'
 			},
 			
-			// Theme configuration
-			module: {
-				imports: [
-					{
-						path: defaultTheme.downloadUrl
-					}
-				]
-			},
-			
+			// Theme — Foundry downloads pack.zip from module.imports[0].path at build time
+			...(defaultEntry?.packUrl
+				? { module: buildThemeConfigPatch(defaultEntry).module }
+				: {}),
+
 			// Markdown renderer settings
 			markdown: {
-				useInternalRenderer: shouldUseInternalRenderer(defaultTheme.tags)
+				useInternalRenderer: defaultEntry?.tags
+					? shouldUseInternalRenderer(defaultEntry.tags)
+					: true,
 			},
 			
 			// Site parameters
 			params: {
-				branding: true
+				branding: true,
+				...(defaultEntry?.packUrl ? buildThemeConfigPatch(defaultEntry).params : {}),
 			},
 			
 			// Publish configuration
@@ -1325,8 +1325,12 @@ export default class FridayPlugin extends Plugin {
 		}
 	}
 
-	showThemeSelectionModal(selectedTheme: string, onSelect: (themeUrl: string, themeName?: string, themeId?: string) => void, isForSingleFile: boolean = false) {
-		const modal = new this.ThemeSelectionModalClass(this.app, selectedTheme, onSelect, this, isForSingleFile);
+	showThemeSelectionModal(
+		selectedSlug: string,
+		onSelect: (entry: import('./theme/types').CatalogEntry) => void,
+		isForSingleFile: boolean = false,
+	) {
+		const modal = new this.ThemeSelectionModalClass!(this.app, selectedSlug, onSelect, this, isForSingleFile);
 		modal.open();
 	}
 
@@ -1619,6 +1623,10 @@ export default class FridayPlugin extends Plugin {
 		this.settings.cloudflareApiBaseUrl = endpoints.apiBaseUrl;
 		this.settings.cloudflarePublicBaseUrl = endpoints.publicBaseUrl;
 		this.settings.cloudflareAccountBaseUrl = endpoints.accountBaseUrl;
+
+		if (Platform.isDesktop && this.themeApiService) {
+			this.themeApiService.clearCache();
+		}
 
 		this.foundryPublishService?.applyCloudflareEndpoints({
 			apiBaseUrl: endpoints.apiBaseUrl,

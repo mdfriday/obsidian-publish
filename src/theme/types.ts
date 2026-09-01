@@ -1,29 +1,41 @@
 /**
- * Theme item from the simplified JSON structure
+ * Catalog entry from GET /v1/theme-catalog (arch/19 §7.4).
+ * Foundry downloads pack via module.imports.path; plugin does not fetch zips.
  */
-export interface ThemeItem {
-    id: string;
-    name: string;
-    author: string;
-    version: string;
-    screenshot: string;
-    download_url: string;
-    demo_url: string;
-    demo_notes_url: string;
-    tags: string[];
-    kind?: string[]; // Plan types (e.g., ["Free"], ["Creator"], ["Pro"])
-    // Computed fields for UI
-    title: string; // Computed from name
-    description?: string; // Computed description
-    thumbnail?: string; // Computed thumbnail URL
-    demo?: string; // Alias for demo_url
-    asset?: string; // Alias for screenshot
+export type ThemeAccess = 'free' | 'plan' | 'purchase';
+export type LockReason = 'purchase_required' | 'plan_required' | null;
+
+export interface CatalogEntry {
+	slug: string;
+	family: string;
+	variant: string;
+	name: string;
+	tier: string;
+	access: ThemeAccess;
+	entitled: boolean;
+	lockReason: LockReason;
+	version: string;
+	/** Canonical pack URL for Foundry — null when not entitled */
+	packUrl: string | null;
+	coverUrl?: string;
+	demoUrl?: string;
+	kinds: string[];
+	tags: string[];
+	official?: boolean;
+	description?: string;
+	thumbnail?: string;
 }
 
-/**
- * Result of a theme search operation
- */
+/** @deprecated Use CatalogEntry */
+export type ThemeItem = CatalogEntry;
+
 export interface ThemeSearchResult {
-    themes: ThemeItem[];
-    hasMore: boolean;
+	themes: CatalogEntry[];
+	hasMore: boolean;
+}
+
+export interface MdfridayThemeParams {
+	family: string;
+	variant: string;
+	version: string;
 }

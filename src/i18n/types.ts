@@ -421,6 +421,7 @@ export interface TranslationNamespace {
 		live_demo: string;
 		use_it: string;
 		current: string;
+		locked: string;
 		free: string;
 		starter: string;
 		enjoy: string;

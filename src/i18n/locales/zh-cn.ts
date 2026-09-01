@@ -505,6 +505,7 @@ export const zhCn = {
 		live_demo: "在线演示",
 		use_it: "使用",
 		current: "当前",
+		locked: "未授权",
 		free: "免费",
 		starter: "入门版",
 		enjoy: "享受版",

@@ -1,42 +1,32 @@
-/**
- * 主题相关的类型和常量
- */
+import type FridayPlugin from '../main';
+import {themeApiService} from '../theme/themeApiService';
+import type {CatalogEntry} from '../theme/types';
 
-/**
- * 默认主题配置
- */
-export const DEFAULT_THEMES = {
-	NOTE: {
-		id: 2,
-		name: 'Note',
-		downloadUrl: 'https://gohugo.net/note.zip?version=1.2',
-		tags: ['Obsidian']
-	},
-	QUARTZ: {
-		id: 17,
-		name: 'Quartz',
-		downloadUrl: 'https://gohugo.net/quartz-theme.zip?version=1.2',
-		tags: []
-	}
+/** Default variant slugs — resolved against catalog at runtime. */
+export const DEFAULT_THEME_SLUGS = {
+	NOTE: 'paper',
+	QUARTZ: 'quartz',
 } as const;
 
-/**
- * 检查主题是否支持 Obsidian 内部渲染器
- * 通过检查主题的 tags 是否包含 'obsidian'
- * 
- * @param themeTags - 主题的标签数组
- * @returns 是否使用内部渲染器
- */
 export function shouldUseInternalRenderer(themeTags: readonly string[] = []): boolean {
-	return !themeTags.includes('Obsidian');
+	return !themeTags.some((t) => t.toLowerCase() === 'obsidian');
 }
 
-/**
- * 根据项目类型获取默认主题
- * 
- * @param isFolder - 是否为文件夹项目
- * @returns 默认主题配置
- */
+export async function resolveDefaultTheme(
+	plugin: FridayPlugin,
+	isFolder: boolean,
+): Promise<CatalogEntry | null> {
+	const slug = isFolder ? DEFAULT_THEME_SLUGS.QUARTZ : DEFAULT_THEME_SLUGS.NOTE;
+	try {
+		return await themeApiService.getThemeBySlug(slug, plugin);
+	} catch (error) {
+		console.warn('[theme] catalog unavailable for default theme:', error);
+		return null;
+	}
+}
+
+/** @deprecated use resolveDefaultTheme */
 export function getDefaultTheme(isFolder: boolean) {
-	return isFolder ? DEFAULT_THEMES.QUARTZ : DEFAULT_THEMES.NOTE;
+	const slug = isFolder ? DEFAULT_THEME_SLUGS.QUARTZ : DEFAULT_THEME_SLUGS.NOTE;
+	return { slug, isFolder };
 }
