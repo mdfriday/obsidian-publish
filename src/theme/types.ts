@@ -24,6 +24,7 @@ export interface CatalogEntry {
 	official?: boolean;
 	description?: string;
 	thumbnail?: string;
+	userAssets?: UserAssetSlot[];
 }
 
 /** @deprecated Use CatalogEntry */
@@ -38,4 +39,13 @@ export interface MdfridayThemeParams {
 	family: string;
 	variant: string;
 	version: string;
+	/** Paths present in project static/ (plugin scan before build). */
+	userStatic?: Record<string, true>;
+}
+
+export interface UserAssetSlot {
+	id: string;
+	path: string;
+	label?: string;
+	description?: string;
 }

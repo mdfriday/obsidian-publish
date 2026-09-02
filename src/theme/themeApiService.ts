@@ -1,28 +1,20 @@
 /**
- * Theme catalog — GET /v1/theme-catalog on the Cloudflare control plane.
- * Download/build: Foundry reads module.imports.path from config.json.
+ * Theme catalog — CDN public snapshot (C7) + API entitlement/packUrl merge.
  */
 
 import {requestUrl} from 'obsidian';
 import type {CatalogEntry, ThemeSearchResult} from './types';
 import type FridayPlugin from '../main';
+import {
+	entitlementContextFromApi,
+	mergePublicCatalogEntry,
+	type PublicCatalogEntry,
+} from './theme-entitlement';
 
-interface RawCatalogEntry {
-	slug: string;
-	family: string;
-	variant: string;
-	name: string;
-	tier: string;
-	access: string;
-	entitled: boolean;
-	lockReason: string | null;
-	version: string;
-	packUrl: string | null;
-	coverUrl?: string;
-	demoUrl?: string;
-	kinds?: string[];
-	tags?: string[];
-	official?: boolean;
+interface ApiCatalogEntry extends PublicCatalogEntry {
+	entitled?: boolean;
+	lockReason?: string | null;
+	packUrl?: string | null;
 }
 
 let catalogCache: CatalogEntry[] | null = null;
@@ -40,47 +32,136 @@ function catalogApiBase(plugin?: FridayPlugin): string {
 	return 'https://api.fsky.top';
 }
 
-function mapEntry(raw: RawCatalogEntry): CatalogEntry {
-	return {
-		slug: raw.slug,
-		family: raw.family,
-		variant: raw.variant,
-		name: raw.name,
-		tier: raw.tier,
-		access: raw.access as CatalogEntry['access'],
-		entitled: raw.entitled !== false,
-		lockReason: (raw.lockReason as CatalogEntry['lockReason']) ?? null,
-		version: raw.version,
-		packUrl: raw.packUrl ?? null,
-		coverUrl: raw.coverUrl,
-		demoUrl: raw.demoUrl,
-		kinds: raw.kinds ?? [],
-		tags: raw.tags ?? [],
-		official: raw.official,
-		description: raw.tags?.length ? raw.tags.join(' · ') : raw.name,
-		thumbnail: raw.coverUrl,
-	};
+function catalogCdnBase(apiBase: string): string {
+	if (apiBase.includes('fsky.top') || apiBase.includes('127.0.0.1')) {
+		return 'https://cdn.fsky.top';
+	}
+	return 'https://cdn.mdfriday.com';
 }
 
-async function fetchCatalog(plugin?: FridayPlugin): Promise<CatalogEntry[]> {
-	const base = catalogApiBase(plugin);
-	const url = `${base}/v1/theme-catalog?_t=${Date.now()}`;
+function authHeaders(plugin?: FridayPlugin): Record<string, string> {
+	const headers: Record<string, string> = { Accept: 'application/json' };
+	const token = plugin?.settings.mdfKey?.trim();
+	if (token) {
+		headers.Authorization = `Bearer ${token}`;
+	}
+	return headers;
+}
+
+async function fetchPublicSnapshot(
+	cdnBase: string,
+): Promise<PublicCatalogEntry[]> {
+	const url = `${cdnBase}/meta/theme-catalog.json`;
 	const response = await requestUrl({
 		url,
 		method: 'GET',
 		headers: { Accept: 'application/json' },
 	});
-
 	if (response.status !== 200) {
-		throw new Error(`Theme catalog unavailable (${response.status}): ${url}`);
+		throw new Error(`Theme catalog snapshot unavailable (${response.status}): ${url}`);
 	}
-
-	const body = response.json as { entries?: RawCatalogEntry[] };
+	const body = response.json as { entries?: PublicCatalogEntry[] };
 	if (!Array.isArray(body.entries)) {
-		throw new Error('Invalid theme catalog response');
+		throw new Error('Invalid theme catalog snapshot');
+	}
+	return body.entries;
+}
+
+async function fetchApiPackMap(
+	apiBase: string,
+	plugin?: FridayPlugin,
+): Promise<Map<string, { packUrl: string | null; entitled: boolean; lockReason: string | null }>> {
+	const url = `${apiBase}/v1/theme-catalog`;
+	const response = await requestUrl({
+		url,
+		method: 'GET',
+		headers: authHeaders(plugin),
+	});
+	if (response.status !== 200) {
+		return new Map();
+	}
+	const body = response.json as { entries?: ApiCatalogEntry[] };
+	const map = new Map<
+		string,
+		{ packUrl: string | null; entitled: boolean; lockReason: string | null }
+	>();
+	for (const entry of body.entries ?? []) {
+		map.set(entry.slug, {
+			packUrl: entry.packUrl ?? null,
+			entitled: entry.entitled !== false,
+			lockReason: entry.lockReason ?? null,
+		});
+	}
+	return map;
+}
+
+async function fetchEntitlements(
+	apiBase: string,
+	plugin?: FridayPlugin,
+) {
+	const token = plugin?.settings.mdfKey?.trim();
+	if (!token) return null;
+	try {
+		const response = await requestUrl({
+			url: `${apiBase}/v1/me/theme-entitlements`,
+			method: 'GET',
+			headers: authHeaders(plugin),
+		});
+		if (response.status !== 200) return null;
+		return response.json as {
+			plan: string;
+			tierGrants: string[];
+			entitlements: Array<{ scope: string; ref: string }>;
+		};
+	} catch {
+		return null;
+	}
+}
+
+async function fetchCatalog(plugin?: FridayPlugin): Promise<CatalogEntry[]> {
+	const apiBase = catalogApiBase(plugin);
+	const cdnBase = catalogCdnBase(apiBase);
+
+	let publicEntries: PublicCatalogEntry[];
+	try {
+		publicEntries = await fetchPublicSnapshot(cdnBase);
+	} catch (cdnErr) {
+		console.warn('[themeApiService] CDN snapshot failed, falling back to API:', cdnErr);
+		const response = await requestUrl({
+			url: `${apiBase}/v1/theme-catalog`,
+			method: 'GET',
+			headers: authHeaders(plugin),
+		});
+		if (response.status !== 200) {
+			throw new Error(`Theme catalog unavailable (${response.status})`);
+		}
+		const body = response.json as { entries?: ApiCatalogEntry[] };
+		if (!Array.isArray(body.entries)) {
+			throw new Error('Invalid theme catalog response');
+		}
+		return body.entries.map((raw) =>
+			mergePublicCatalogEntry(raw, entitlementContextFromApi(null), raw.packUrl ?? null),
+		);
 	}
 
-	return body.entries.map(mapEntry);
+	const [entBody, packMap] = await Promise.all([
+		fetchEntitlements(apiBase, plugin),
+		fetchApiPackMap(apiBase, plugin),
+	]);
+	const ctx = entitlementContextFromApi(entBody);
+
+	return publicEntries.map((entry) => {
+		const api = packMap.get(entry.slug);
+		const merged = mergePublicCatalogEntry(entry, ctx, api?.packUrl ?? null);
+		if (api) {
+			merged.entitled = api.entitled;
+			merged.lockReason = (api.lockReason as CatalogEntry['lockReason']) ?? null;
+			if (api.entitled && api.packUrl) {
+				merged.packUrl = api.packUrl;
+			}
+		}
+		return merged;
+	});
 }
 
 function filterThemes(
@@ -155,7 +236,6 @@ export const themeApiService = {
 		return themes.find((t) => t.slug === slug) ?? null;
 	},
 
-	/** @deprecated use getThemeBySlug */
 	async getThemeById(slug: string, plugin?: FridayPlugin): Promise<CatalogEntry | null> {
 		return this.getThemeBySlug(slug, plugin);
 	},

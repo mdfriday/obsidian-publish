@@ -3,6 +3,13 @@ import {Notice, requestUrl} from 'obsidian';
 import type {TFile, TFolder} from 'obsidian';
 import type {ProgressUpdate, PublishProgressUpdate} from '../types/events';
 import {joinPath} from '../utils/common';
+import type {CatalogEntry} from '../theme/types';
+import {themeApiService} from '../theme/themeApiService';
+import {
+	buildUserStaticMap,
+	listVaultStaticFiles,
+	mergeMdfridayParams,
+} from '../theme/user-static-sync';
 
 /** Share mode baseURL per arch/03-build-contract.md */
 export function computeShareBaseUrl(publicBaseUrl: string, siteId: string): string {
@@ -224,6 +231,49 @@ export class ProjectServiceManager {
 			console.error('[ProjectServiceManager] Error saving config:', error);
 			return false;
 		}
+	}
+
+	/**
+	 * Scan project static/ and write params.mdfriday.userStatic before build.
+	 */
+	async syncUserStaticConfig(
+		projectName: string,
+		catalogEntry?: CatalogEntry | null,
+	): Promise<void> {
+		let entry = catalogEntry ?? null;
+		const config = await this.getConfig(projectName);
+		const mdfriday = config.params?.mdfriday as Record<string, unknown> | undefined;
+
+		if (!entry && mdfriday?.family && mdfriday?.variant) {
+			entry = await themeApiService.findByFamilyVariant(
+				String(mdfriday.family),
+				String(mdfriday.variant),
+				this.plugin,
+			);
+		}
+
+		if (!entry?.userAssets?.length) {
+			return;
+		}
+
+		const infoResult = await this.plugin.foundryProjectService.getProjectInfo(
+			this.plugin.absWorkspacePath,
+			projectName,
+		);
+		const staticLink = infoResult.success ? infoResult.data?.staticLink : undefined;
+
+		let userStatic: Record<string, true> = {};
+		if (staticLink?.sourcePath) {
+			const rel = this.plugin.getVaultRelativePath(staticLink.sourcePath);
+			const files = await listVaultStaticFiles(this.plugin.app, rel);
+			userStatic = buildUserStaticMap(files, entry.userAssets);
+		}
+
+		const params = {
+			...(config.params ?? {}),
+			mdfriday: mergeMdfridayParams(mdfriday, { userStatic }),
+		};
+		await this.saveConfig(projectName, 'params', params);
 	}
 
 	/**
@@ -681,6 +731,7 @@ export class ProjectServiceManager {
 		onProgress?: (progress: ProgressUpdate) => void
 	): Promise<BuildResult> {
 		try {
+			await this.syncUserStaticConfig(projectName);
 			const result = await this.plugin.foundryBuildService.buildProject({
 				workspacePath: this.plugin.absWorkspacePath,
 				projectNameOrPath: projectName,

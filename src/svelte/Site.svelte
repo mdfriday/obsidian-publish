@@ -280,6 +280,9 @@
 			return;
 		}
 		await saveFoundryConfig('theme.catalog', buildThemeConfigPatch(entry));
+		if (plugin.projectServiceManager && projectName) {
+			await plugin.projectServiceManager.syncUserStaticConfig(projectName, entry);
+		}
 		if (entry.tags?.length) {
 			const useInternalRenderer = shouldUseInternalRenderer(entry.tags);
 			await saveFoundryConfig('markdown.useInternalRenderer', useInternalRenderer);
