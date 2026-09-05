@@ -891,6 +891,24 @@ ${snapshot.css.vars}
   max-width: 100%;
   height: auto;
 }
+.mdfriday-built-with {
+  margin: 3rem auto 2rem;
+  max-width: 720px;
+  text-align: center;
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  color: var(--text-muted, #888);
+  opacity: 0.85;
+}
+.mdfriday-built-with a {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+  opacity: 0.9;
+}
+.mdfriday-built-with a:hover {
+  opacity: 1;
+}
 
   </style>
 </head>
@@ -900,6 +918,9 @@ ${snapshot.css.vars}
       ${rendered.html}
     </div>
   </div>
+  <footer class="mdfriday-built-with">
+    Built with <a href="https://mdfriday.com" target="_blank" rel="noopener noreferrer">MDFriday</a>
+  </footer>
 </body>
 </html>
 `;
