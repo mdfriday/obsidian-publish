@@ -17,6 +17,10 @@
 	import type { ProjectState, ProgressUpdate, PublishProgressUpdate } from "../types/events";
 	import { buildThemeConfigPatch } from "../theme/theme-config";
 	import { DEFAULT_THEME_SLUGS, shouldUseInternalRenderer } from "../utils/theme";
+	import {
+		isObsidianThemeMode,
+		packageSingleNotePreview,
+	} from "../obsidian-local-preview";
 
 	// Receive props
 	export let app: App;
@@ -62,16 +66,26 @@
 	// 标志用户是否手动选择过主题
 	let userHasSelectedTheme = false;
 	
+	// Preview mode: Obsidian snapshot by default for single note; Foundry when user picks a Foundry theme.
+	let previewMode: 'obsidian' | 'foundry' = 'obsidian';
+	// Track whether user has selected a Foundry catalog theme (not OBSIDIAN-tagged).
+	let foundryThemeSelected = false;
+
 	// 响应式主题设置 - 只在用户未手动选择主题时根据内容类型自动设置
 	$: {
 		if (currentContents.length > 0 && !userHasSelectedTheme) {
 			const firstContent = currentContents[0];
 			if (firstContent.file) {
-				selectedThemeSlug = DEFAULT_THEME_SLUGS.NOTE;
-				selectedThemeName = 'Paper';
+				// Single note: default Obsidian local preview path
+				selectedThemeSlug = '';
+				selectedThemeName = 'Obsidian (current)';
+				previewMode = 'obsidian';
+				foundryThemeSelected = false;
 			} else if (firstContent.folder) {
 				selectedThemeSlug = DEFAULT_THEME_SLUGS.QUARTZ;
 				selectedThemeName = 'Quartz';
+				previewMode = 'foundry';
+				foundryThemeSelected = true;
 			}
 		}
 	}
@@ -277,6 +291,10 @@
 	async function applyThemeFromCatalog(entry: CatalogEntry) {
 		if (!entry.packUrl) {
 			console.warn('[Site] Cannot apply locked theme:', entry.slug);
+			return;
+		}
+		// Only apply Foundry theme when not using Obsidian snapshot mode
+		if (isObsidianThemeMode(entry.tags || [])) {
 			return;
 		}
 		await saveFoundryConfig('theme.catalog', buildThemeConfigPatch(entry));
@@ -742,7 +760,16 @@
 		userHasSelectedTheme = true;
 		currentThemeWithSample = theme;
 
-		await applyThemeFromCatalog(theme);
+		// OBSIDIAN tag → Obsidian local preview; otherwise Foundry
+		const useObsidian = isObsidianThemeMode(theme.tags || []);
+		previewMode = useObsidian ? 'obsidian' : 'foundry';
+		foundryThemeSelected = !useObsidian;
+		if (useObsidian) {
+			// Keep Foundry config for theme pack optional; don't force useInternalRenderer
+			// for Obsidian-tagged themes on this independent path
+		} else {
+			await applyThemeFromCatalog(theme);
+		}
 	}
 
 	function openThemesCatalog() {
@@ -1017,7 +1044,13 @@
 			selectedThemeDownloadUrl = entry.packUrl || '';
 			userHasSelectedTheme = true;
 			currentThemeWithSample = entry;
-			await applyThemeFromCatalog(entry);
+			// OBSIDIAN tag → keep Obsidian local preview; otherwise Foundry
+			const useObsidian = isObsidianThemeMode(entry.tags || []);
+			previewMode = useObsidian ? 'obsidian' : 'foundry';
+			foundryThemeSelected = !useObsidian;
+			if (!useObsidian) {
+				await applyThemeFromCatalog(entry);
+			}
 		}, isForSingleFile);
 	}
 
@@ -1188,17 +1221,28 @@
 			return;
 		}
 
-		if (!plugin.currentProjectName) {
-			new Notice('No project selected. Please right-click a folder first.', 3000);
-			return;
-		}
+		// Single-note Obsidian path (independent, dynamic rebuild from current vault)
+		const firstContent = currentContents[0];
+		const isSingleNote = !!firstContent.file;
+		// Single note always uses Obsidian MarkdownRenderer + Theme Snapshot when
+		// preview is not explicitly set to Foundry. Folder publish still uses Foundry.
+		const useObsidianLocal =
+			isSingleNote && (previewMode === 'obsidian' || !foundryThemeSelected);
 
 		// Stop previous preview if running to avoid port conflicts
 		if (hasPreview || serverRunning) {
 			try {
-				await stopPreview();
+				// Stop Foundry server if any
+				if (plugin.currentProjectName) {
+					await stopPreview();
+				}
+				// Stop independent Obsidian local servers
+				const { stopAllLocalPreviewServers } = await import(
+					'../obsidian-local-preview'
+				);
+				stopAllLocalPreviewServers();
 				// Wait a moment for the server to fully stop
-				await new Promise(resolve => setTimeout(resolve, 500));
+				await new Promise(resolve => setTimeout(resolve, 300));
 			} catch (error) {
 				console.warn('[Site] Error stopping previous preview:', error);
 				// Continue anyway, the new server start might handle the conflict
@@ -1211,9 +1255,27 @@
 		hasPreview = false;
 
 		try {
-			// Note: Configuration is auto-saved through reactive statements
-			// No need for explicit saveCurrentConfiguration() call
-			
+			if (useObsidianLocal) {
+				// Independent Obsidian local preview (Theme Snapshot + MarkdownRenderer)
+				const file = firstContent.file!;
+				const result = await packageSingleNotePreview(plugin, { file });
+				previewUrl = result.url;
+				previewId = result.rootDir;
+				hasPreview = true;
+				isPreviewBuilding = false;
+				isBuilding = false;
+				new Notice(t('ui.preview_success') || 'Local preview ready', 2500);
+				return;
+			}
+
+			// Foundry path: keep existing build + serve
+			if (!plugin.currentProjectName) {
+				new Notice('No project selected. Please right-click a folder first.', 3000);
+				isBuilding = false;
+				isPreviewBuilding = false;
+				return;
+			}
+
 			// Get theme info to check if we need custom renderer
 			const themeInfo = await themeApiService.getThemeBySlug(selectedThemeSlug, plugin);
 			hasOBTag = themeInfo?.tags?.some(tag =>
@@ -1360,6 +1422,7 @@
 	 * Stop preview server
 	 */
 	async function stopPreview() {
+		// Independent Obsidian local preview is not managed via Foundry stop
 		if (!plugin.currentProjectName) {
 			return;
 		}

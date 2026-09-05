@@ -260,9 +260,10 @@ export class FoundryProjectManagementModal extends SuggestModal<ObsidianProjectI
 			}
 		}
 		
-		// If no content was loaded, initialize with empty content
+		// If no content was loaded, leave empty so the panel can still seed
+		// from the selection path before publish.
 		if (!contentLoaded) {
-			console.warn('[Friday] No content links or file link found in project, initializing with empty content');
+			console.warn('[Friday] No content links or file link found in project');
 		}
 		
 		// Load static assets folder if specified

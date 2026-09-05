@@ -101,9 +101,9 @@ export class Site {
 			currentContents = contents;
 		})();
 
-		// 检查是否有现有内容
+		// First content is initialized via initializeContent*;
+		// addLanguageContent is for additional languages only.
 		if (currentContents.length === 0) {
-			new Notice(this.plugin.i18n.t('messages.please_use_publish_first'), 5000);
 			return false;
 		}
 
