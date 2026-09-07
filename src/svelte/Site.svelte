@@ -1,26 +1,35 @@
 <script lang="ts">
 	import {App, Notice, TFolder, TFile, FileSystemAdapter, requestUrl} from "obsidian";
 	import FridayPlugin from "../main";
-	import ProgressBar from "./ProgressBar.svelte";
-	import DomainSection from "./DomainSection.svelte";
-	import HistorySection from "./HistorySection.svelte";
+	import PublishPanel from "./publish/PublishPanel.svelte";
 	import {onMount, onDestroy, tick} from "svelte";
 	import type { PublishMethod } from "../types/publish";
 	import { normalizePublishMethod } from "../types/publish";
+	import type { PublishMode } from "../types/publish-config";
+	import {
+		coercePublishMode,
+		getDefaultPublishConfig,
+		selectionKindFromContents,
+	} from "../types/publish-config";
 	import * as path from "path";
 	import * as fs from "fs";
 	import JSZip from "jszip";
 	import {GetBaseUrl} from "../main";
-	import {createStyleRenderer, OBStyleRenderer} from "../markdown";
 	import {themeApiService} from "../theme/themeApiService";
 	import type { CatalogEntry } from "../theme/types";
 	import type { ProjectState, ProgressUpdate, PublishProgressUpdate } from "../types/events";
 	import { buildThemeConfigPatch } from "../theme/theme-config";
-	import { DEFAULT_THEME_SLUGS, shouldUseInternalRenderer } from "../utils/theme";
+	import { DEFAULT_THEME_SLUGS } from "../utils/theme";
 	import {
-		isObsidianThemeMode,
-		packageSingleNotePreview,
+		buildFaithfulToProject,
+		serveFaithfulPublicDir,
+		stopAllLocalPreviewServers,
 	} from "../obsidian-local-preview";
+	import {
+		resolvePathPublishConfig,
+		savePathPublishConfig,
+		selectionVaultPath,
+	} from "../services/path-config";
 
 	// Receive props
 	export let app: App;
@@ -66,40 +75,52 @@
 	// 标志用户是否手动选择过主题
 	let userHasSelectedTheme = false;
 	
-	// Preview mode: Obsidian snapshot by default for single note; Foundry when user picks a Foundry theme.
-	let previewMode: 'obsidian' | 'foundry' = 'obsidian';
-	// Track whether user has selected a Foundry catalog theme (not OBSIDIAN-tagged).
-	let foundryThemeSelected = false;
+	// Publish mode: single note defaults to faithful; folder is always themed.
+	let publishMode: PublishMode = 'faithful';
+	let showAuthTip = false;
+	let outputTab: 'online' | 'preview' = 'online';
+	let userChoseMode = false;
+	/** Skip path hydrate once (right-click defaults publish). */
+	let skipPathHydrate = false;
+	let lastHydratedPath: string | null = null;
+	let pathConfigSaveTimeout: ReturnType<typeof setTimeout> | null = null;
 
-	// 响应式主题设置 - 只在用户未手动选择主题时根据内容类型自动设置
-	$: {
-		if (currentContents.length > 0 && !userHasSelectedTheme) {
-			const firstContent = currentContents[0];
-			if (firstContent.file) {
-				// Single note: default Obsidian local preview path
-				selectedThemeSlug = '';
-				selectedThemeName = 'Obsidian (current)';
-				previewMode = 'obsidian';
-				foundryThemeSelected = false;
-			} else if (firstContent.folder) {
-				selectedThemeSlug = DEFAULT_THEME_SLUGS.QUARTZ;
-				selectedThemeName = 'Quartz';
-				previewMode = 'foundry';
-				foundryThemeSelected = true;
-			}
-		}
+	$: selectionKind = selectionKindFromContents(currentContents);
+	$: showModeSwitch = selectionKind === 'note' && currentContents.length > 0;
+	$: showFolderModeFixed = selectionKind === 'folder' && currentContents.length > 0;
+	$: showThemePicker =
+		currentContents.length > 0 &&
+		(selectionKind === 'folder' || publishMode === 'themed');
+	$: activeVaultPath = selectionVaultPath(currentContents);
+	$: selectionFileName = currentContents[0]
+		? currentContents[0].file?.name || currentContents[0].folder?.name || ''
+		: '';
+	$: selectionPathLabel = currentContents[0]
+		? currentContents[0].file?.path ||
+			currentContents[0].folder?.path ||
+			''
+		: '';
+	$: modeHint =
+		publishMode === 'faithful'
+			? t('ui.mode_faithful_hint')
+			: t('ui.mode_themed_hint');
+
+	// Hydrate mode/theme from pathConfigs when selection changes (sidebar open).
+	$: if (activeVaultPath && activeVaultPath !== lastHydratedPath) {
+		void hydrateFromPathConfig(activeVaultPath);
+	}
+	$: if (!activeVaultPath) {
+		lastHydratedPath = null;
 	}
 
 	// Advanced settings state
-	let showAdvancedSettings = false;
+	let showAdvancedInSettings = false;
 	let googleAnalyticsId = '';
 	let disqusShortname = '';
 	let sitePassword = '';
 	
-	// UI state for new layout
+	// UI state
 	let autoPublishEnabled = false;
-	let showSettingsPanel = false; // Settings panel collapsed by default
-	let showAdvancedInSettings = false; // Advanced settings in settings panel collapsed
 
 	let themesDir = ''; // Directory for themes
 
@@ -118,14 +139,13 @@
 	let publishProgress = 0;
 	let publishSuccess = false;
 	let publishUrl = '';
+	let publishError = '';
 	let selectedPublishOption: PublishMethod = normalizePublishMethod();
 
 	/** Pre-auth: show inline before opening Turnstile browser */
 	let authPrepareStep: 'idle' | 'prepare' | 'waiting' = 'idle';
 
 	/** Collapsible project capability sections */
-	let showThemeSection = false;
-	let showPreviewSection = false;
 	let themeList: CatalogEntry[] = [];
 	let themesLoading = false;
 
@@ -136,8 +156,6 @@
 	let isDownloadingSample = false;
 	let sampleDownloadProgress = 0;
 	let currentThemeWithSample: any = null;
-
-	let hasOBTag = false;
 	
 	// Debounce timeout for auto-saving language configuration
 	let languageConfigSaveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -293,18 +311,12 @@
 			console.warn('[Site] Cannot apply locked theme:', entry.slug);
 			return;
 		}
-		// Only apply Foundry theme when not using Obsidian snapshot mode
-		if (isObsidianThemeMode(entry.tags || [])) {
-			return;
-		}
 		await saveFoundryConfig('theme.catalog', buildThemeConfigPatch(entry));
 		if (plugin.projectServiceManager && projectName) {
 			await plugin.projectServiceManager.syncUserStaticConfig(projectName, entry);
 		}
-		if (entry.tags?.length) {
-			const useInternalRenderer = shouldUseInternalRenderer(entry.tags);
-			await saveFoundryConfig('markdown.useInternalRenderer', useInternalRenderer);
-		}
+		// Themed builds always use Foundry default MarkdownIt (Phase 1.5)
+		await saveFoundryConfig('markdown.useInternalRenderer', true);
 	}
 
 	async function resolveThemeFromConfig(config: Record<string, unknown>): Promise<CatalogEntry | null> {
@@ -352,9 +364,13 @@
 				selectedThemeDownloadUrl = matchedTheme.packUrl || state.config.module?.imports?.[0]?.path || '';
 				userHasSelectedTheme = true;
 				currentThemeWithSample = matchedTheme;
-				if (matchedTheme.tags && state.config.markdown?.useInternalRenderer === undefined) {
-					const useInternalRenderer = shouldUseInternalRenderer(matchedTheme.tags);
-					await saveFoundryConfig('markdown.useInternalRenderer', useInternalRenderer);
+				if (state.config.markdown?.useInternalRenderer === undefined) {
+					await saveFoundryConfig('markdown.useInternalRenderer', true);
+				}
+				// Restored themed config → stay in themed mode when selection is a note
+				if (selectionKindFromContents(currentContents) === 'note') {
+					userChoseMode = true;
+					publishMode = 'themed';
 				}
 			} else if (state.config.module?.imports?.[0]?.path) {
 				selectedThemeDownloadUrl = state.config.module.imports[0].path;
@@ -386,6 +402,7 @@
 		if (state.config.params?.lastPublishUrl) {
 			publishUrl = state.config.params.lastPublishUrl;
 			publishSuccess = true;
+			outputTab = 'online';
 		}
 
 			// 5. Load language configuration
@@ -487,23 +504,22 @@
 		// Phases: 'scanning' | 'uploading' | 'deploying' | 'complete'
 		switch (progress.phase) {
 			case 'scanning':
-				// 0-20%: Scanning files to upload
-				publishProgress = Math.min(20, progress.percentage * 0.2);
+				// Build phase may forward absolute 0–40 via scanning
+				publishProgress = Math.min(40, progress.percentage ?? publishProgress);
 				break;
 			case 'uploading':
-				// 20-80%: Uploading files
-				publishProgress = 20 + Math.min(60, progress.percentage * 0.6);
+				// 40-85%: Uploading files
+				publishProgress = 40 + Math.min(45, (progress.percentage ?? 0) * 0.45);
 				break;
 			case 'deploying':
-				// 80-95%: Deploying on server
-				publishProgress = 80 + Math.min(15, progress.percentage * 0.15);
+				// 85-95%: Deploying on server
+				publishProgress = 85 + Math.min(10, (progress.percentage ?? 0) * 0.1);
 				break;
 			case 'complete':
-				// 100%: Publish complete
 				publishProgress = 100;
 				break;
 			default:
-				publishProgress = progress.percentage;
+				publishProgress = progress.percentage ?? publishProgress;
 		}
 	}
 
@@ -534,6 +550,12 @@
 		isBuilding = false;
 		isPreviewBuilding = false;
 		previewUrl = normalizeLocalPreviewUrl(result.url || '', result.port || serverPort);
+		outputTab = 'preview';
+		new Notice(t('ui.preview_success') || 'Local preview ready', 2500);
+		if (previewUrl) {
+			window.open(previewUrl, '_blank');
+		}
+		void persistPathConfigNow();
 	}
 
 	/**
@@ -600,6 +622,9 @@
 		authPrepareStep = 'idle';
 
 		publishUrl = buildPublishUrl(result.url || '');
+		if (publishUrl) {
+			outputTab = 'online';
+		}
 		if (result.baseURL) {
 			sitePath = result.baseURL;
 		}
@@ -608,6 +633,9 @@
 			plugin.settings.hasPublishedOnce = true;
 			void plugin.saveSettings();
 			new Notice(t('messages.site_published_successfully'), 5000);
+		}
+		if (!skipPathHydrate) {
+			schedulePersistPathConfig();
 		}
 	}
 
@@ -620,7 +648,9 @@
 		isBuilding = false;
 		isPreviewBuilding = false;
 		publishSuccess = false;
+		publishError = error || t('ui.publish_failed');
 		console.error('[Site] Publish error:', error);
+		new Notice(publishError, 5000);
 	}
 
 	/**
@@ -674,6 +704,7 @@
 			setSitePath: setSitePathExternal,
 			startPreviewAndWait,
 			startPublish,
+			applyDefaultsAndPublish,
 			clearAllContent,
 			openAccountFromGrowth,
 			enableAutoPublish
@@ -681,6 +712,32 @@
 		}
 
 		await loadThemeList();
+
+		// Keep sidebar selection in sync with the active markdown note.
+		const syncActiveNote = (file: TFile | null) => {
+			if (!file || file.extension !== 'md') return;
+			if (skipPathHydrate || isPublishing || isPreviewBuilding || plugin.isProjectInitializing) {
+				return;
+			}
+			if (!plugin.isViewOpen?.()) return;
+			const currentPath = selectionVaultPath(currentContents);
+			if (currentPath === file.path) return;
+			void plugin.openPublishPanel(null, file);
+		};
+
+		plugin.registerEvent(
+			app.workspace.on('file-open', (file) => {
+				syncActiveNote(file instanceof TFile ? file : null);
+			}),
+		);
+
+		const activeFile = app.workspace.getActiveFile();
+		if (activeFile instanceof TFile && activeFile.extension === 'md') {
+			const currentPath = selectionVaultPath(currentContents);
+			if (!currentPath) {
+				syncActiveNote(activeFile);
+			}
+		}
 
 		// Notify Main.ts that component is ready
 		if (plugin.handleSiteEvent && plugin.currentProjectName) {
@@ -718,6 +775,7 @@
 	async function continueGuestKeySetup() {
 		const mgr = plugin.projectServiceManager;
 		if (!mgr) return;
+		showAuthTip = false;
 		authPrepareStep = 'waiting';
 		const key = await mgr.requestGuestKey();
 		authPrepareStep = 'idle';
@@ -733,6 +791,7 @@
 	function onDomainActive(hostname: string) {
 		publishUrl = `https://${hostname.replace(/\/$/, '')}/`;
 		publishSuccess = true;
+		outputTab = 'online';
 		sitePath = '/';
 		void persistLastPublishUrl(publishUrl);
 		void saveFoundryConfig('baseURL', '/');
@@ -758,18 +817,100 @@
 		selectedThemeName = theme.name;
 		selectedThemeSlug = theme.slug;
 		userHasSelectedTheme = true;
+		userChoseMode = true;
+		publishMode = 'themed';
 		currentThemeWithSample = theme;
+		await applyThemeFromCatalog(theme);
+		schedulePersistPathConfig();
+	}
 
-		// OBSIDIAN tag → Obsidian local preview; otherwise Foundry
-		const useObsidian = isObsidianThemeMode(theme.tags || []);
-		previewMode = useObsidian ? 'obsidian' : 'foundry';
-		foundryThemeSelected = !useObsidian;
-		if (useObsidian) {
-			// Keep Foundry config for theme pack optional; don't force useInternalRenderer
-			// for Obsidian-tagged themes on this independent path
-		} else {
-			await applyThemeFromCatalog(theme);
+	async function hydrateFromPathConfig(vaultPath: string) {
+		if (skipPathHydrate) {
+			lastHydratedPath = vaultPath;
+			return;
 		}
+		const kind = selectionKindFromContents(currentContents);
+		const cfg = resolvePathPublishConfig(plugin, vaultPath, kind);
+		lastHydratedPath = vaultPath;
+
+		publishMode = coercePublishMode(kind, cfg.mode);
+		if (cfg.mode === 'themed' || kind === 'folder') {
+			userChoseMode = true;
+			userHasSelectedTheme = !!cfg.themeSlug;
+			if (themeList.length === 0) {
+				await loadThemeList();
+			}
+			const slug =
+				cfg.themeSlug ||
+				themeList.find((item) => !!item.packUrl)?.slug ||
+				DEFAULT_THEME_SLUGS.QUARTZ;
+			selectedThemeSlug = slug;
+			const theme = themeList.find((item) => item.slug === slug);
+			selectedThemeName = theme?.name || slug;
+			if (theme?.packUrl) {
+				selectedThemeDownloadUrl = theme.packUrl;
+				currentThemeWithSample = theme;
+			}
+		} else {
+			userChoseMode = !!plugin.settings.pathConfigs?.[vaultPath];
+			userHasSelectedTheme = false;
+			selectedThemeSlug = '';
+			selectedThemeName = 'Obsidian (faithful)';
+		}
+		// Password plaintext is not restored from path config
+		if (!cfg.hasPasswordFlag) {
+			sitePassword = '';
+		}
+	}
+
+	function schedulePersistPathConfig() {
+		if (skipPathHydrate || !activeVaultPath || plugin.isProjectInitializing) {
+			return;
+		}
+		if (pathConfigSaveTimeout) {
+			clearTimeout(pathConfigSaveTimeout);
+		}
+		pathConfigSaveTimeout = setTimeout(() => {
+			void persistPathConfigNow();
+		}, 300);
+	}
+
+	async function persistPathConfigNow() {
+		const vaultPath = activeVaultPath;
+		if (!vaultPath) return;
+		const kind = selectionKindFromContents(currentContents);
+		const mode = coercePublishMode(kind, publishMode);
+		await savePathPublishConfig(plugin, vaultPath, {
+			mode,
+			themeSlug: mode === 'themed' ? selectedThemeSlug || undefined : undefined,
+			hasPasswordFlag: !!sitePassword.trim(),
+		});
+	}
+
+	function handlePasswordChange(value: string) {
+		sitePassword = value;
+		schedulePersistPathConfig();
+	}
+
+	function setPublishMode(mode: PublishMode) {
+		if (selectionKind === 'folder') {
+			publishMode = 'themed';
+			schedulePersistPathConfig();
+			return;
+		}
+		userChoseMode = true;
+		publishMode = mode;
+		if (mode === 'faithful') {
+			selectedThemeSlug = '';
+			selectedThemeName = 'Obsidian (faithful)';
+			userHasSelectedTheme = false;
+		} else if (!selectedThemeSlug) {
+			selectedThemeSlug = DEFAULT_THEME_SLUGS.NOTE;
+			selectedThemeName = 'Paper';
+			void applyThemeBySlug(selectedThemeSlug);
+			return;
+		}
+		schedulePersistPathConfig();
 	}
 
 	function openThemesCatalog() {
@@ -801,6 +942,10 @@
 		if (languageConfigSaveTimeout) {
 			clearTimeout(languageConfigSaveTimeout);
 			languageConfigSaveTimeout = null;
+		}
+		if (pathConfigSaveTimeout) {
+			clearTimeout(pathConfigSaveTimeout);
+			pathConfigSaveTimeout = null;
 		}
 		
 		// Clean up server
@@ -1043,14 +1188,10 @@
 			selectedThemeName = entry.name;
 			selectedThemeDownloadUrl = entry.packUrl || '';
 			userHasSelectedTheme = true;
+			userChoseMode = true;
+			publishMode = 'themed';
 			currentThemeWithSample = entry;
-			// OBSIDIAN tag → keep Obsidian local preview; otherwise Foundry
-			const useObsidian = isObsidianThemeMode(entry.tags || []);
-			previewMode = useObsidian ? 'obsidian' : 'foundry';
-			foundryThemeSelected = !useObsidian;
-			if (!useObsidian) {
-				await applyThemeFromCatalog(entry);
-			}
+			await applyThemeFromCatalog(entry);
 		}, isForSingleFile);
 	}
 
@@ -1140,11 +1281,6 @@
 	}
 
 	/**
-	 * Create renderer based on theme tags
-	 * If theme has "Book" tag, use OBStyleRenderer (full-featured with plugin rendering)
-	 * Otherwise, use lightweight StyleRenderer
-	 */
-	/**
 	 * Reset publish UI state
 	 */
 	function resetPublishState() {
@@ -1152,67 +1288,15 @@
 		publishProgress = 0;
 		publishSuccess = false;
 		publishUrl = '';
+		publishError = '';
 	}
 
-	async function createRendererBasedOnTheme() {
-		try {
-			// Get theme information by ID
-			const obImagesDir = path.join(absPreviewDir, 'public', 'ob-images');
-			
-			// Ensure ob-images directory exists
-			// Convert absolute path to vault-relative path
-			if (plugin.vaultBasePath) {
-				const relativeObImagesDir = path.relative(plugin.vaultBasePath, obImagesDir);
-				
-				if (!await app.vault.adapter.exists(relativeObImagesDir)) {
-					await app.vault.adapter.mkdir(relativeObImagesDir);
-				}
-			}
-			
-			if (hasOBTag) {
-				// Use OBStyleRenderer for themes with "Book" tag
-				// This includes full CSS collection, plugin rendering, and theme styles
-				const renderer = new OBStyleRenderer(plugin, {
-					includeCSS: true, // Include CSS in HTML for complete styling
-					waitForPlugins: true, // Wait for plugin rendering callbacks
-					timeout: 200, // Shorter timeout with smart detection
-					containerWidth: "1000px",
-					includeTheme: true // Include theme styles
-				});
-				
-				// Configure resource processor for app:// URLs
-				renderer.getResourceProcessor().configureImageOutput(obImagesDir, sitePath, currentContents[0]?.folder?.name);
-				return renderer;
-			} else {
-				// Use lightweight StyleRenderer for other themes
-				const renderer = createStyleRenderer(plugin, {
-					autoHeadingID: true,
-					waitForStable: false, // Don't wait for DOM stable for better performance
-				});
-				
-				// Configure resource processor for internal links
-				if (renderer.getResourceProcessor) {
-					renderer.getResourceProcessor().configureImageOutput(obImagesDir, sitePath, currentContents[0]?.folder?.name);
-				}
-				
-				return renderer;
-			}
-		} catch (error) {
-			console.warn('Failed to get theme info, falling back to lightweight renderer:', error);
-			// Fallback to lightweight renderer
-			const obImagesDir = path.join(absPreviewDir, 'public', 'ob-images');
-			const renderer = createStyleRenderer(plugin, {
-				autoHeadingID: true,
-				waitForStable: false,
-			});
-			
-			// Configure resource processor for internal links
-			if (renderer.getResourceProcessor) {
-				renderer.getResourceProcessor().configureImageOutput(obImagesDir, sitePath, currentContents[0]?.folder?.name);
-			}
-			
-			return renderer;
-		}
+	async function resolveProjectPublicDir(): Promise<string | null> {
+		const name = plugin.currentProjectName;
+		if (!name || !plugin.projectServiceManager) return null;
+		const info = await plugin.projectServiceManager.getProjectInfo(name);
+		if (!info?.path) return null;
+		return path.join(info.path, 'public');
 	}
 
 	async function startPreview() {
@@ -1221,31 +1305,20 @@
 			return;
 		}
 
-		// Single-note Obsidian path (independent, dynamic rebuild from current vault)
 		const firstContent = currentContents[0];
-		const isSingleNote = !!firstContent.file;
-		// Single note always uses Obsidian MarkdownRenderer + Theme Snapshot when
-		// preview is not explicitly set to Foundry. Folder publish still uses Foundry.
-		const useObsidianLocal =
-			isSingleNote && (previewMode === 'obsidian' || !foundryThemeSelected);
+		const kind = selectionKindFromContents(currentContents);
+		const mode = coercePublishMode(kind, publishMode);
+		const useFaithful = kind === 'note' && mode === 'faithful' && !!firstContent.file;
 
-		// Stop previous preview if running to avoid port conflicts
 		if (hasPreview || serverRunning) {
 			try {
-				// Stop Foundry server if any
 				if (plugin.currentProjectName) {
 					await stopPreview();
 				}
-				// Stop independent Obsidian local servers
-				const { stopAllLocalPreviewServers } = await import(
-					'../obsidian-local-preview'
-				);
 				stopAllLocalPreviewServers();
-				// Wait a moment for the server to fully stop
 				await new Promise(resolve => setTimeout(resolve, 300));
 			} catch (error) {
 				console.warn('[Site] Error stopping previous preview:', error);
-				// Continue anyway, the new server start might handle the conflict
 			}
 		}
 
@@ -1255,20 +1328,39 @@
 		hasPreview = false;
 
 		try {
-			if (useObsidianLocal) {
-				// Independent Obsidian local preview (Theme Snapshot + MarkdownRenderer)
-				const file = firstContent.file!;
-				const result = await packageSingleNotePreview(plugin, { file });
-				previewUrl = result.url;
-				previewId = result.rootDir;
+			if (useFaithful) {
+				if (!plugin.currentProjectName) {
+					new Notice('No project selected. Please right-click a note first.', 3000);
+					isBuilding = false;
+					isPreviewBuilding = false;
+					return;
+				}
+				const publicDir = await resolveProjectPublicDir();
+				if (!publicDir) {
+					throw new Error('Project path unavailable');
+				}
+				buildProgress = 30;
+				await buildFaithfulToProject(plugin, {
+					file: firstContent.file!,
+					publicDir,
+					password: sitePassword.trim() || undefined,
+				});
+				buildProgress = 80;
+				const server = await serveFaithfulPublicDir(publicDir);
+				previewUrl = server.url;
+				previewId = publicDir;
+				absPreviewDir = publicDir;
 				hasPreview = true;
 				isPreviewBuilding = false;
 				isBuilding = false;
+				buildProgress = 100;
+				outputTab = 'preview';
 				new Notice(t('ui.preview_success') || 'Local preview ready', 2500);
+				window.open(previewUrl, '_blank');
+				await persistPathConfigNow();
 				return;
 			}
 
-			// Foundry path: keep existing build + serve
 			if (!plugin.currentProjectName) {
 				new Notice('No project selected. Please right-click a folder first.', 3000);
 				isBuilding = false;
@@ -1276,29 +1368,15 @@
 				return;
 			}
 
-			// Get theme info to check if we need custom renderer
-			const themeInfo = await themeApiService.getThemeBySlug(selectedThemeSlug, plugin);
-			hasOBTag = themeInfo?.tags?.some(tag =>
-				tag.toLowerCase() === 'obsidian'
-			) || false;
-			
-			// Create custom Markdown renderer based on theme
-			const customRenderer = await createRendererBasedOnTheme();
-			
-			// Use event system to request preview from Main.ts
+			// Themed: Foundry default SSG serve (no custom Obsidian renderer)
 			if (plugin.handleSiteEvent) {
 				await plugin.handleSiteEvent('previewRequested', {
 					projectName: plugin.currentProjectName,
 					port: serverPort,
-					renderer: hasOBTag ? customRenderer : undefined,
-					publishConfig: undefined
+					publishConfig: undefined,
 				});
-				
-				// Note: Progress updates and completion will be handled by callbacks
-				// (updateBuildProgress, onPreviewStarted, onPreviewError)
 			}
 
-			// Send counter for preview (don't wait for result)
 			if (plugin.hugoverse) {
 				plugin.hugoverse.sendCounter('preview').catch(error => {
 					console.warn('Counter request failed (non-critical):', error);
@@ -1312,7 +1390,6 @@
 			isPreviewBuilding = false;
 			buildProgress = 0;
 		}
-		// Note: isBuilding will be set to false by onPreviewStarted/onPreviewError callbacks
 	}
 
 	async function autoPublish() {
@@ -1326,15 +1403,13 @@
 			return;
 		}
 
-		// Stop previous preview if running to avoid port conflicts
 		if (hasPreview || serverRunning) {
 			try {
 				await stopPreview();
-				// Wait a moment for the server to fully stop
+				stopAllLocalPreviewServers();
 				await new Promise(resolve => setTimeout(resolve, 500));
 			} catch (error) {
 				console.warn('[Site] Error stopping previous preview:', error);
-				// Continue anyway, the new server start might handle the conflict
 			}
 		}
 
@@ -1343,50 +1418,38 @@
 		hasPreview = false;
 
 		try {
-			// Note: Configuration is auto-saved through reactive statements
-			// No need for explicit saveCurrentConfiguration() call
-			
-			// Get theme info to check if we need custom renderer
-			const themeInfo = await themeApiService.getThemeBySlug(selectedThemeSlug, plugin);
-			hasOBTag = themeInfo?.tags?.some(tag =>
-				tag.toLowerCase() === 'obsidian'
-			) || false;
-			
-			// Create custom Markdown renderer based on theme
-			const customRenderer = await createRendererBasedOnTheme();
-			
-			// Prepare Cloudflare publish config for auto-publish
-			const publishConfig = { method: 'cloudflare' as const, config: undefined };
+			const kind = selectionKindFromContents(currentContents);
+			const mode = coercePublishMode(kind, publishMode);
 
+			if (mode === 'faithful' && currentContents[0]?.file) {
+				// Faithful has no watch/auto-rebuild — run one-shot publish
+				await runPublish();
+				isBuilding = false;
+				return;
+			}
+
+			const publishConfig = { method: 'cloudflare' as const, config: undefined };
 			resetPublishState();
-			
-			// Use event system to request preview with publish config from Main.ts
+
 			if (plugin.handleSiteEvent) {
 				await plugin.handleSiteEvent('previewRequested', {
 					projectName: plugin.currentProjectName,
 					port: serverPort,
-					renderer: hasOBTag ? customRenderer : undefined,
-					publishConfig
+					publishConfig,
 				});
-				
-				// Note: Progress updates and completion will be handled by callbacks
-				// (updateBuildProgress, onPreviewStarted, onPreviewError)
 			}
 
-			// Send counter for preview (don't wait for result)
 			if (plugin.hugoverse) {
 				plugin.hugoverse.sendCounter('preview').catch(error => {
 					console.warn('Counter request failed (non-critical):', error);
 				});
 			}
-
 		} catch (error) {
 			console.error('Auto-publish failed:', error);
 			new Notice(t('messages.preview_failed', { error: error.message }), 5000);
 			isBuilding = false;
 			buildProgress = 0;
 		}
-		// Note: isBuilding will be set to false by onPreviewStarted/onPreviewError callbacks
 	}
 	
 	/**
@@ -1459,16 +1522,38 @@
 		resetPublishState();
 
 		try {
-			const themeInfo = await themeApiService.getThemeBySlug(selectedThemeSlug, plugin);
-			hasOBTag = themeInfo?.tags?.some(tag =>
-				tag.toLowerCase() === 'obsidian'
-			) || false;
-			const customRenderer = await createRendererBasedOnTheme();
+			const kind = selectionKindFromContents(currentContents);
+			const mode = coercePublishMode(kind, publishMode);
+			const skipBuild = mode === 'faithful';
+
+			if (skipBuild) {
+				const file = currentContents[0]?.file;
+				if (!file) {
+					throw new Error('Faithful publish requires a single markdown note');
+				}
+				const publicDir = await resolveProjectPublicDir();
+				if (!publicDir) {
+					throw new Error('Project path unavailable');
+				}
+				publishProgress = 15;
+				await buildFaithfulToProject(plugin, {
+					file,
+					publicDir,
+					password: sitePassword.trim() || undefined,
+				});
+				publishProgress = 40;
+			}
+
+			if (sitePassword) {
+				await saveFoundryConfig('params.password', sitePassword);
+			} else {
+				await saveFoundryConfig('params.password', '');
+			}
 
 			if (plugin.handleSiteEvent) {
 				await plugin.handleSiteEvent('buildAndPublishRequested', {
 					projectName: plugin.currentProjectName,
-					renderer: hasOBTag ? customRenderer : undefined,
+					skipBuild,
 				});
 			}
 		} catch (error) {
@@ -1480,7 +1565,52 @@
 		}
 	}
 
-	async function startPublish() {
+	/**
+	 * Right-click defaults → publish immediately (ignores saved path config).
+	 * Note → faithful; folder → themed + first catalog theme.
+	 */
+	async function applyDefaultsAndPublish() {
+		skipPathHydrate = true;
+		await tick();
+		const kind = selectionKindFromContents(currentContents);
+		const defaults = getDefaultPublishConfig(kind);
+		userChoseMode = false;
+		userHasSelectedTheme = false;
+		publishMode = defaults.mode;
+		sitePassword = '';
+		showAuthTip = false;
+		lastHydratedPath = activeVaultPath;
+
+		if (kind === 'folder') {
+			publishMode = 'themed';
+			if (themeList.length === 0) {
+				await loadThemeList();
+			}
+			const firstTheme = themeList.find((item) => !!item.packUrl);
+			if (firstTheme?.packUrl) {
+				await applyThemeBySlug(firstTheme.slug);
+			} else {
+				const slug = defaults.themeSlug || DEFAULT_THEME_SLUGS.QUARTZ;
+				selectedThemeSlug = slug;
+				selectedThemeName = slug;
+				userHasSelectedTheme = true;
+				userChoseMode = true;
+			}
+		} else {
+			selectedThemeSlug = '';
+			selectedThemeName = 'Obsidian (faithful)';
+			publishMode = 'faithful';
+		}
+
+		try {
+			await startPublish({ allowGuestBootstrap: true });
+		} finally {
+			skipPathHydrate = false;
+			await persistPathConfigNow();
+		}
+	}
+
+	async function startPublish(opts?: { allowGuestBootstrap?: boolean }) {
 		if (autoPublishEnabled) {
 			await autoPublish();
 			return;
@@ -1496,23 +1626,33 @@
 			return;
 		}
 
-		const mgr = plugin.projectServiceManager;
-		if (!plugin.settings.mdfKey && mgr) {
-			if (mgr.needsTurnstileForGuest()) {
-				authPrepareStep = 'prepare';
+		if (!plugin.settings.mdfKey) {
+			if (!opts?.allowGuestBootstrap) {
+				showAuthTip = true;
 				return;
 			}
-			authPrepareStep = 'waiting';
-			const key = await mgr.requestGuestKey();
-			authPrepareStep = 'idle';
-			if (!key) return;
+			const mgr = plugin.projectServiceManager;
+			if (mgr) {
+				if (mgr.needsTurnstileForGuest()) {
+					authPrepareStep = 'prepare';
+					return;
+				}
+				authPrepareStep = 'waiting';
+				const key = await mgr.requestGuestKey();
+				authPrepareStep = 'idle';
+				if (!key) return;
+			}
 		}
 
+		showAuthTip = false;
 		await runPublish();
 	}
 
 	// Handle auto-publish toggle change (only save when user manually toggles)
-	function handleAutoPublishToggle() {
+	function handleAutoPublishToggle(enabled?: boolean) {
+		if (typeof enabled === 'boolean') {
+			autoPublishEnabled = enabled;
+		}
 		if (plugin.currentProjectName && !plugin.isProjectInitializing) {
 			saveFoundryConfig('params.autoPublish', autoPublishEnabled);
 		}
@@ -1779,1540 +1919,111 @@
 			}
 		}
 	}
+
+	/** Take down current share link in UI (≠ History rollback). */
+	async function revokeShare() {
+		const ok = confirm(t('ui.revoke_share_confirm'));
+		if (!ok) return;
+
+		const foundry = plugin.foundryPublishService;
+		const name = plugin.currentProjectName || projectName;
+		if (foundry && name) {
+			try {
+				const bind = await foundry.getCloudflareBinding({
+					workspacePath: plugin.absWorkspacePath,
+					projectName: name,
+				});
+				if (bind.success && bind.cloudflareProjectId) {
+					const mgr = plugin.projectServiceManager;
+					const auth = mgr ? await mgr.resolveAuthToken() : null;
+					const token = auth?.token;
+					if (token) {
+						const domains = await foundry.listDomains(token, bind.cloudflareProjectId);
+						const list = domains.domains || [];
+						const active = list.find(
+							(d) => d.status === 'active' || d.status === 'pending',
+						);
+						if (active?.id) {
+							await foundry.removeDomain(token, active.id);
+							await foundry.markBindingShare({
+								workspacePath: plugin.absWorkspacePath,
+								projectName: name,
+								publicBaseUrl: plugin.settings.cloudflarePublicBaseUrl,
+							});
+						}
+					}
+				}
+			} catch (error) {
+				console.warn('[Site] revokeShare domain cleanup failed:', error);
+			}
+		}
+
+		publishSuccess = false;
+		publishUrl = '';
+		await saveFoundryConfig('params.lastPublishUrl', '');
+		new Notice(t('ui.revoke_share_done'), 4000);
+	}
+
+	function openPreviewUrl() {
+		if (previewUrl) {
+			window.open(previewUrl, '_blank');
+		}
+	}
+
+	async function copyPreviewUrl() {
+		if (!previewUrl) return;
+		try {
+			await navigator.clipboard.writeText(previewUrl);
+			new Notice(t('messages.url_copied_to_clipboard') || 'URL copied to clipboard!');
+		} catch (error) {
+			console.error('Failed to copy preview URL:', error);
+			new Notice('Failed to copy URL');
+		}
+	}
 </script>
 
-<div class="site-builder">
-	<!-- Quick Publish Panel -->
-	<div class="quick-publish-panel">
-		<!-- Header with Logo and AI Switch Button -->
-		<div class="panel-header">
-			<div class="panel-header-left">
-				<img src="https://gohugo.net/mdfriday.svg" alt="MDFriday" class="mdfriday-logo" width="20" height="20" />
-				<span class="panel-title">{displaySiteTitle}</span>
-			</div>
-		</div>
+<PublishPanel
+	{plugin}
+	{t}
+	{selectionKind}
+	fileName={selectionFileName}
+	pathLabel={selectionPathLabel}
+	{publishMode}
+	{showModeSwitch}
+	{showFolderModeFixed}
+	{showThemePicker}
+	{modeHint}
+	{themeList}
+	{selectedThemeSlug}
+	{themesLoading}
+	{sitePassword}
+	{showAuthTip}
+	{isPublishing}
+	{publishProgress}
+	{autoPublishEnabled}
+	{publishUrl}
+	{publishError}
+	hasContent={currentContents.length > 0}
+	{previewUrl}
+	{isPreviewBuilding}
+	{buildProgress}
+	{outputTab}
+	projectName={plugin.currentProjectName || projectName}
+	onSetMode={setPublishMode}
+	onSelectTheme={applyThemeBySlug}
+	onOpenThemesCatalog={openThemesCatalog}
+	onPasswordChange={handlePasswordChange}
+	onPublish={startPublish}
+	onPreview={startPreview}
+	onStopPublish={stopPublish}
+	onOpenUrl={openPublishUrl}
+	onCopyUrl={copyPublishUrl}
+	onRevokeShare={revokeShare}
+	onOpenPreview={openPreviewUrl}
+	onCopyPreview={copyPreviewUrl}
+	onOutputTabChange={(tab) => (outputTab = tab)}
+	onContinueAuth={continueGuestKeySetup}
+	onOpenAccount={openAccountFromGrowth}
+	onDomainActive={onDomainActive}
+/>
 
-		{#if authPrepareStep === 'prepare'}
-			<div class="auth-prepare-card">
-				<div class="auth-prepare-title">{t('ui.publish_prepare_title')}</div>
-				<p class="auth-prepare-body">{t('ui.publish_prepare_body')}</p>
-				<div class="auth-prepare-actions">
-					<button class="mod-cta auth-prepare-continue" on:click={continueGuestKeySetup}>
-						{t('ui.publish_prepare_continue')}
-					</button>
-					<button class="auth-prepare-cancel" on:click={cancelGuestKeySetup}>
-						{t('common.cancel')}
-					</button>
-				</div>
-			</div>
-		{:else if authPrepareStep === 'waiting'}
-			<div class="auth-prepare-card auth-prepare-waiting">
-				<div class="auth-prepare-title">{t('ui.publish_prepare_waiting')}</div>
-			</div>
-		{/if}
-
-		<!-- Current Content Display -->
-		<div class="current-content">
-			<div class="content-label">{t('ui.current_content') || 'Current Content'}</div>
-			<div class="content-display">
-				{#if currentContents.length > 0}
-					{#each currentContents as content (content.id)}
-						<div class="content-item">
-							{#if content.folder}
-								<svg class="content-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-									<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-								</svg>
-								<span class="content-path">{content.folder.path}</span>
-							{:else if content.file}
-								<svg class="content-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-									<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-									<polyline points="14 2 14 8 20 8"></polyline>
-								</svg>
-								<span class="content-path">{content.file.path}</span>
-							{/if}
-						</div>
-					{/each}
-				{:else}
-					<span class="content-empty">{t('ui.no_content_selected_hint')}</span>
-				{/if}
-			</div>
-		</div>
-
-		<!-- Publish Status Area -->
-		<div class="publish-status-area">
-			{#if isPublishing && !publishSuccess}
-				<!-- Publishing in progress -->
-				<div class="status-publishing">
-					<div class="status-text">{t('ui.publish_building')}</div>
-					<ProgressBar progress={publishProgress} />
-				</div>
-			{:else if publishSuccess && publishUrl}
-				<!-- Published successfully with URL -->
-				<div class="status-success">
-					<div class="status-text success">✓ {t('ui.growth_title_success')}</div>
-					<a href={publishUrl} target="_blank" class="publish-url-display">{publishUrl}</a>
-					<div class="url-actions">
-						<button class="url-action-btn" on:click={openPublishUrl} title={t('ui.open_in_browser') || 'Open in browser'}>
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-								<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-								<polyline points="15 3 21 3 21 9"></polyline>
-								<line x1="10" y1="14" x2="21" y2="3"></line>
-							</svg>
-							<span>{t('ui.open') || 'Open'}</span>
-						</button>
-						<button class="url-action-btn" on:click={copyPublishUrl} title={t('ui.copy_url') || 'Copy URL'}>
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-								<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-								<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-							</svg>
-							<span>{t('ui.copy') || 'Copy'}</span>
-						</button>
-					</div>
-				</div>
-
-				{#if showUpgradeCard}
-					<div class="growth-card">
-						{#if isGuestAccount}
-							<div class="growth-card-title">{t('ui.growth_guest_keep')}</div>
-							<p class="growth-card-hint">{t('ui.growth_guest_lead')}</p>
-							<ul class="growth-benefits">
-								<li>{t('ui.growth_guest_benefit_keep')}</li>
-								<li>{t('ui.growth_guest_benefit_same_url')}</li>
-								<li>{t('ui.growth_guest_benefit_projects')}</li>
-							</ul>
-							<button class="mod-cta growth-sign-in-btn" on:click={openAccountFromGrowth}>
-								{t('settings.login')}
-							</button>
-						{:else}
-							<div class="growth-card-title">{t('ui.growth_upgrade_title')}</div>
-							<p class="growth-card-hint">{t('ui.growth_upgrade_lead')}</p>
-							<ul class="growth-benefits">
-								<li>{t('ui.growth_upgrade_benefit_domain')}</li>
-								<li>{t('ui.growth_upgrade_benefit_history')}</li>
-								<li>{t('ui.growth_upgrade_benefit_storage')}</li>
-							</ul>
-							<button class="mod-cta growth-sign-in-btn" on:click={openAccountFromGrowth}>
-								{t('ui.growth_upgrade_cta')}
-							</button>
-						{/if}
-					</div>
-				{/if}
-			{/if}
-		</div>
-
-		<!-- Publish Actions -->
-		<!-- Publish Actions: primary CTA + auto-publish -->
-		<div class="publish-actions-row">
-			{#if autoPublishEnabled && isPublishing}
-				<div class="publishing-status">
-					<span class="publishing-text">{t('ui.realtime_publishing')}</span>
-					<button
-						class="stop-publish-btn"
-						on:click={stopPublish}
-						title={t('ui.stop_publish')}
-					>
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<rect x="6" y="6" width="12" height="12"></rect>
-						</svg>
-						{t('ui.stop')}
-					</button>
-				</div>
-			{:else}
-				<button
-					class="quick-publish-btn"
-					on:click={startPublish}
-					disabled={currentContents.length === 0 || isPublishing || authPrepareStep === 'waiting'}
-				>
-					{publishUrl ? t('ui.publish_again') : t('ui.publish')}
-				</button>
-			{/if}
-			<div class="publish-auto-block">
-				<label
-					class="auto-publish-toggle publish-auto-toggle"
-					title={t('ui.realtime_publish_hint')}
-				>
-					<input
-						type="checkbox"
-						class="toggle-checkbox"
-						bind:checked={autoPublishEnabled}
-						on:change={handleAutoPublishToggle}
-						disabled={isPublishing}
-					/>
-					<span class="toggle-label">{t('ui.realtime_publish')}</span>
-				</label>
-				<p class="publish-auto-hint">{t('ui.realtime_publish_hint')}</p>
-			</div>
-		</div>
-	</div>
-
-	<!-- Project capabilities -->
-	<div class="project-capabilities">
-		<div class="capability-section">
-			<button
-				type="button"
-				class="subsection-toggle"
-				on:click={() => showThemeSection = !showThemeSection}
-				aria-expanded={showThemeSection}
-			>
-				<svg class="collapse-icon" class:is-collapsed={!showThemeSection} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<polyline points="6 9 12 15 18 9"></polyline>
-				</svg>
-				<span class="setting-item-name">{t('ui.theme')}</span>
-				<span class="capability-summary">{displayThemeName}</span>
-			</button>
-			{#if showThemeSection}
-				<div class="capability-body-inline">
-					<select
-						class="form-select theme-select"
-						value={selectedThemeSlug}
-						disabled={themesLoading}
-						on:change={(e) => applyThemeBySlug(e.currentTarget.value)}
-					>
-						{#if themesLoading && themeList.length === 0}
-							<option value={selectedThemeSlug}>{displayThemeName}</option>
-						{:else}
-							{#each themeList.filter((t) => t.packUrl) as theme (theme.slug)}
-								<option value={theme.slug}>{theme.name}</option>
-							{/each}
-						{/if}
-					</select>
-					<p class="field-hint">
-						{t('ui.theme_catalog_hint')}
-						<button type="button" class="link-button" on:click={openThemesCatalog}>
-							mdfriday.com/themes
-						</button>
-					</p>
-					{#if currentThemeWithSample && 'demo_notes_url' in currentThemeWithSample && currentThemeWithSample.demo_notes_url}
-						{#if isDownloadingSample}
-							<div class="sample-download-progress">
-								<span class="progress-text">{t('ui.downloading_sample')}</span>
-								<ProgressBar progress={sampleDownloadProgress} />
-							</div>
-						{:else}
-							<button class="action-button" on:click={downloadThemeSample}>
-								{t('ui.download_sample')}
-							</button>
-						{/if}
-					{/if}
-				</div>
-			{/if}
-		</div>
-
-		<DomainSection
-			{plugin}
-			projectName={plugin.currentProjectName || projectName}
-			onDomainActive={onDomainActive}
-		/>
-
-		<HistorySection
-			{plugin}
-			projectName={plugin.currentProjectName || projectName}
-		/>
-
-		<div class="capability-section">
-			<button
-				type="button"
-				class="subsection-toggle"
-				on:click={() => showPreviewSection = !showPreviewSection}
-				aria-expanded={showPreviewSection}
-			>
-				<svg class="collapse-icon" class:is-collapsed={!showPreviewSection} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<polyline points="6 9 12 15 18 9"></polyline>
-				</svg>
-				<span class="setting-item-name">{t('ui.preview')}</span>
-				<span class="capability-summary">
-					{isPreviewBuilding
-						? t('ui.preview_preparing')
-						: hasPreview
-							? t('ui.preview_ready')
-							: t('ui.preview_off')}
-				</span>
-			</button>
-			{#if showPreviewSection}
-				<div class="capability-body-inline">
-					{#if isPreviewBuilding}
-						<div class="progress-container">
-							<p>{t('ui.preview_building')}</p>
-							<ProgressBar progress={buildProgress} />
-						</div>
-					{:else if hasPreview && previewUrl}
-						<div class="preview-link">
-							<p class="section-label">{t('ui.preview_link')}</p>
-							<a href={previewUrl} target="_blank" class="preview-url">{previewUrl}</a>
-							<div class="preview-actions">
-								<button
-									class="action-button preview-button"
-									on:click={startPreview}
-									disabled={currentContents.length === 0}
-								>
-									{t('ui.regenerate_preview')}
-								</button>
-								<button
-									class="action-button export-button"
-									on:click={exportSite}
-									disabled={isExporting}
-								>
-									{isExporting ? t('ui.exporting') : t('ui.export_site')}
-								</button>
-							</div>
-						</div>
-					{:else}
-						<p class="field-hint">{t('ui.preview_hint')}</p>
-						<button
-							class="action-button preview-button"
-							on:click={startPreview}
-							disabled={currentContents.length === 0}
-						>
-							{t('ui.generate_preview')}
-						</button>
-					{/if}
-				</div>
-			{/if}
-		</div>
-	</div>
-
-	<!-- More settings (Collapsible) -->
-	<div class="settings-panel">
-		<button 
-			class="panel-toggle setting-item-control" 
-			on:click={() => showSettingsPanel = !showSettingsPanel}
-			aria-expanded={showSettingsPanel}
-		>
-			<svg class="collapse-icon" class:is-collapsed={!showSettingsPanel} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-				<polyline points="6 9 12 15 18 9"></polyline>
-			</svg>
-			<span class="setting-item-name">{t('ui.more_settings') || 'More settings'}</span>
-		</button>
-		
-		{#if showSettingsPanel}
-			<div class="panel-content">
-				<!-- Multi-language Content -->
-				<div class="settings-section">
-					<div class="section-label">{t('ui.multilingual_content')}</div>
-					<div class="multilang-table">
-						<div class="multilang-header">
-							<div class="multilang-header-cell">{t('ui.content_path')}</div>
-							<div class="multilang-header-cell">
-								<span>{t('ui.language')}</span>
-								{#if currentContents.length > 0}
-									<button 
-										class="add-language-btn"
-										on:click={clearAllContent}
-										title={t('ui.clear_all_content')}
-									>
-										{t('ui.clear')}
-									</button>
-								{/if}
-							</div>
-						</div>
-						{#each currentContents as content (content.id)}
-							<div class="multilang-row" class:removable={currentContents.length > 1}>
-								<div class="multilang-cell content-path-cell">
-									<span class="content-path">
-										{content.folder ? content.folder.name : content.file ? content.file.name : t('ui.no_content_selected')}
-									</span>
-									{#if content.weight === 1}
-										<span class="default-badge">{t('ui.default')}</span>
-									{/if}
-								</div>
-								<div class="multilang-cell language-cell">
-									<select 
-										class="language-select"
-										value={content.languageCode}
-										on:change={(e) => updateLanguageCode(content.id, e.currentTarget.value)}
-									>
-										{#each SUPPORTED_LANGUAGES as lang}
-											<option value={lang.code}>{lang.name} ({lang.englishName})</option>
-										{/each}
-									</select>
-									{#if currentContents.length > 1}
-										<button 
-											class="remove-btn"
-											on:click={() => removeLanguageContent(content.id)}
-											title={t('ui.remove_language')}
-										>
-											<span class="remove-icon">×</span>
-										</button>
-									{/if}
-								</div>
-							</div>
-						{/each}
-						{#if currentContents.length === 0}
-							<div class="multilang-empty">
-								<span class="empty-message">{t('ui.no_content_selected_hint')}</span>
-							</div>
-						{/if}
-					</div>
-				</div>
-
-				<!-- Site Name -->
-				<div class="settings-section">
-					<label class="section-label" for="site-name">{t('ui.site_name')}</label>
-					<input
-						type="text"
-						class="form-input"
-						bind:value={siteName}
-						on:blur={() => saveFoundryConfig('title', siteName)}
-						placeholder={t('ui.site_name_placeholder')}
-					/>
-				</div>
-
-				<!-- Publish Configuration -->
-				<div class="settings-section">
-					<h3 class="section-title">{t('ui.publish_config') || 'Publish Configuration'}</h3>
-					<div class="publish-section">
-						<div class="field-hint">
-							Publishes to Cloudflare automatically. No account required.
-						</div>
-					</div>
-				</div>
-
-				<!-- Advanced Settings (Collapsible with Obsidian style) -->
-				<div class="settings-section">
-					<div class="collapsible-section">
-						<button 
-							class="subsection-toggle setting-item-control" 
-							on:click={() => showAdvancedInSettings = !showAdvancedInSettings}
-							aria-expanded={showAdvancedInSettings}
-						>
-							<svg class="collapse-icon" class:is-collapsed={!showAdvancedInSettings} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-								<polyline points="6 9 12 15 18 9"></polyline>
-							</svg>
-							<span class="setting-item-name">{t('ui.advanced_settings')}</span>
-						</button>
-						
-						{#if showAdvancedInSettings}
-							<div class="subsection-content">
-								<!-- Site Assets -->
-								<div class="advanced-field">
-									<div class="section-label">{t('ui.site_assets')}</div>
-									<div class="site-assets-container">
-										<div class="assets-display">
-											{#if currentAssets}
-												<span class="assets-path">{currentAssets.folder?.name || currentAssets.path}</span>
-												<button 
-													class="clear-assets-btn"
-													on:click={clearSiteAssets}
-													title={t('ui.clear_assets')}
-												>
-													{t('ui.clear_assets')}
-												</button>
-											{:else}
-												<span class="assets-placeholder">{t('ui.site_assets_placeholder')}</span>
-											{/if}
-										</div>
-										<div class="assets-hint">
-											{t('ui.site_assets_hint')}
-										</div>
-									</div>
-								</div>
-
-								<div class="advanced-field">
-									<label class="section-label" for="site-path">{t('ui.site_path')}</label>
-									<input
-										type="text"
-										id="site-path"
-										class="form-input form-input-readonly"
-										value={sitePath}
-										readonly
-										placeholder={t('ui.site_path_share_placeholder')}
-										title={t('ui.site_path_share_hint')}
-									/>
-									<div class="field-hint">
-										{t('ui.site_path_share_hint')}
-									</div>
-								</div>
-
-								<div class="advanced-field">
-									<label class="section-label" for="site-password">{t('ui.site_password')}</label>
-									<input
-										type="password"
-										class="form-input"
-										bind:value={sitePassword}
-										on:blur={() => saveFoundryConfig('params.password', sitePassword)}
-										placeholder={t('ui.site_password_placeholder')}
-										title={t('ui.site_password_hint')}
-									/>
-									<div class="field-hint">
-										{t('ui.site_password_hint')}
-									</div>
-								</div>
-
-								<div class="advanced-field">
-									<label class="section-label" for="google-analytics">{t('ui.google_analytics_id')}</label>
-									<input
-										type="text"
-										class="form-input"
-										bind:value={googleAnalyticsId}
-										on:blur={() => saveFoundryConfig('services.googleAnalytics.id', googleAnalyticsId)}
-										placeholder={t('ui.google_analytics_placeholder')}
-										title={t('ui.google_analytics_hint')}
-									/>
-									<div class="field-hint">
-										{t('ui.google_analytics_hint')}
-									</div>
-								</div>
-
-								<div class="advanced-field">
-									<label class="section-label" for="disqus-shortname">{t('ui.disqus_shortname')}</label>
-									<input
-										type="text"
-										class="form-input"
-										bind:value={disqusShortname}
-										on:blur={() => saveFoundryConfig('params.disqusShortname', disqusShortname)}
-										placeholder={t('ui.disqus_placeholder')}
-										title={t('ui.disqus_hint')}
-									/>
-									<div class="field-hint">
-										{t('ui.disqus_hint')}
-									</div>
-								</div>
-							</div>
-						{/if}
-					</div>
-				</div>
-			</div>
-		{/if}
-	</div>
-</div>
-
-<style>
-	/* ========== Main Container ========== */
-	.site-builder {
-		padding: 16px;
-		max-width: 100%;
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-	}
-
-	/* ========== Quick Publish Panel ========== */
-	.quick-publish-panel {
-		background: var(--background-primary);
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 6px;
-		padding: 16px;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-	}
-
-	.panel-header {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		margin-bottom: 16px;
-		padding-bottom: 12px;
-		border-bottom: 1px solid var(--background-modifier-border);
-	}
-
-	.mdfriday-logo {
-		flex-shrink: 0;
-		display: block;
-	}
-
-	.panel-title {
-		font-size: 16px;
-		font-weight: 600;
-		color: var(--text-normal);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.auth-prepare-card {
-		margin-bottom: 16px;
-		padding: 12px 14px;
-		background: var(--mdf-primary-soft, var(--background-secondary));
-		border: 1px solid var(--mdf-border, var(--background-modifier-border));
-		border-radius: var(--mdf-radius-sm, 6px);
-	}
-
-	.auth-prepare-title {
-		font-size: 14px;
-		font-weight: 600;
-		color: var(--text-normal);
-		margin-bottom: 6px;
-	}
-
-	.auth-prepare-body {
-		font-size: 13px;
-		color: var(--text-muted);
-		margin: 0 0 12px;
-		line-height: 1.45;
-	}
-
-	.auth-prepare-actions {
-		display: flex;
-		gap: 8px;
-		align-items: center;
-	}
-
-	.auth-prepare-continue {
-		border-color: var(--mdf-primary, var(--interactive-accent)) !important;
-	}
-
-	.auth-prepare-cancel {
-		padding: 6px 12px;
-		border: none;
-		background: transparent;
-		color: var(--text-muted);
-		font-size: 13px;
-		cursor: pointer;
-	}
-
-	.auth-prepare-cancel:hover {
-		color: var(--text-normal);
-	}
-
-	.auth-prepare-waiting .auth-prepare-title {
-		margin-bottom: 0;
-	}
-
-	.growth-card {
-		margin-top: 12px;
-		padding: 12px 14px;
-		background: var(--mdf-primary-soft, var(--background-secondary));
-		border: 1px solid var(--mdf-border, var(--background-modifier-border));
-		border-radius: var(--mdf-radius-sm, 6px);
-	}
-
-	.growth-card-title {
-		font-size: 13px;
-		font-weight: 600;
-		color: var(--text-normal);
-		margin-bottom: 4px;
-	}
-
-	.growth-card-hint {
-		font-size: 12px;
-		color: var(--text-muted);
-		margin: 0 0 8px;
-		line-height: 1.45;
-	}
-
-	.growth-benefits {
-		margin: 0 0 12px;
-		padding-left: 1.1rem;
-		font-size: 12px;
-		color: var(--text-normal);
-		line-height: 1.55;
-	}
-
-	.growth-benefits li {
-		margin-bottom: 2px;
-	}
-
-	.growth-sign-in-btn {
-		width: 100%;
-		margin-bottom: 10px;
-		border-color: var(--mdf-primary, var(--interactive-accent)) !important;
-	}
-
-
-	.preview-realtime-toggle {
-		margin-top: 14px;
-	}
-
-	.preview-realtime-hint {
-		margin-top: 6px;
-		margin-bottom: 0;
-	}
-	.theme-select {
-		width: 100%;
-	}
-
-	.link-button {
-		border: none;
-		background: transparent;
-		color: var(--mdf-primary, var(--interactive-accent));
-		padding: 0;
-		font-size: inherit;
-		cursor: pointer;
-		text-decoration: underline;
-	}
-
-	.growth-sign-in-btn {
-		margin-bottom: 0;
-	}
-
-
-	/* Current Content Display */
-	.current-content {
-		margin-bottom: 16px;
-	}
-
-	.content-label {
-		font-size: 12px;
-		font-weight: 500;
-		color: var(--text-muted);
-		margin-bottom: 6px;
-	}
-
-	.content-display {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-		padding: 8px 12px;
-		background: var(--background-secondary);
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		min-height: 36px;
-	}
-
-	.content-item {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-
-	.content-icon {
-		color: var(--text-muted);
-		flex-shrink: 0;
-	}
-
-	.content-display .content-path {
-		color: var(--text-normal);
-		font-size: 13px;
-		flex: 1;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.content-empty {
-		color: var(--text-muted);
-		font-size: 13px;
-		font-style: italic;
-	}
-
-	/* Publish Status Area */
-	.publish-status-area {
-		margin-bottom: 16px;
-		min-height: 60px;
-	}
-
-	.status-publishing,
-	.status-success {
-		padding: 12px;
-		background: var(--background-secondary);
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-	}
-
-	.status-text {
-		font-size: 13px;
-		color: var(--text-muted);
-		margin-bottom: 8px;
-	}
-
-	.status-text.success {
-		color: var(--text-success);
-		font-weight: 500;
-	}
-
-	.publish-url-display {
-		display: block;
-		color: var(--interactive-accent);
-		text-decoration: none;
-		font-size: 12px;
-		word-break: break-all;
-		margin-bottom: 12px;
-		padding: 6px 8px;
-		background: var(--background-primary);
-		border-radius: 3px;
-	}
-
-	.publish-url-display:hover {
-		text-decoration: underline;
-	}
-
-	.url-actions {
-		display: flex;
-		justify-content: center;
-		gap: 8px;
-	}
-
-	.url-action-btn {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding: 6px 12px;
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		background: var(--background-primary);
-		color: var(--text-normal);
-		font-size: 12px;
-		cursor: pointer;
-		transition: all 0.2s;
-	}
-
-	.url-action-btn:hover {
-		background: var(--interactive-hover);
-		border-color: var(--interactive-accent);
-	}
-
-	.url-action-btn svg {
-		color: var(--text-muted);
-	}
-
-	/* Publish Actions Row */
-	.publish-actions-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-	}
-
-	.publish-auto-toggle {
-		margin-left: 0;
-		flex-shrink: 0;
-	}
-
-	.publish-auto-block {
-		margin-left: auto;
-		display: flex;
-		flex-direction: column;
-		align-items: flex-end;
-		gap: 4px;
-		max-width: 52%;
-	}
-
-	.publish-auto-hint {
-		margin: 0;
-		font-size: 11px;
-		line-height: 1.35;
-		color: var(--text-muted);
-		text-align: right;
-	}
-
-	.quick-publish-btn {
-		flex: 0 1 auto;
-		min-width: 120px;
-		padding: 10px 16px;
-		border: none;
-		border-radius: 4px;
-		background: var(--interactive-accent);
-		color: var(--text-on-accent);
-		font-size: 14px;
-		font-weight: 500;
-		cursor: pointer;
-		transition: background-color 0.2s;
-		min-height: 36px;
-	}
-
-	.quick-publish-btn:hover:not(:disabled) {
-		background: var(--interactive-accent-hover);
-	}
-
-	.quick-publish-btn:disabled {
-		background: var(--background-modifier-border);
-		color: var(--text-muted);
-		cursor: not-allowed;
-		opacity: 0.6;
-	}
-
-	.publishing-status {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		flex: 0 0 auto;
-	}
-
-	.publishing-text {
-		font-size: 14px;
-		font-weight: 500;
-		color: var(--interactive-accent);
-		animation: pulse 1.5s ease-in-out infinite;
-	}
-
-	@keyframes pulse {
-		0%, 100% {
-			opacity: 1;
-		}
-		50% {
-			opacity: 0.6;
-		}
-	}
-
-	.stop-publish-btn {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding: 6px 12px;
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		background: var(--background-primary);
-		color: var(--text-normal);
-		font-size: 13px;
-		font-weight: 500;
-		cursor: pointer;
-		transition: all 0.2s;
-	}
-
-	.stop-publish-btn:hover {
-		background: var(--background-modifier-error);
-		color: var(--text-error);
-		border-color: var(--text-error);
-	}
-
-	.stop-publish-btn svg {
-		fill: currentColor;
-	}
-
-	.auto-publish-toggle {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		cursor: pointer;
-		user-select: none;
-	}
-
-	.toggle-checkbox {
-		width: 16px;
-		height: 16px;
-		cursor: pointer;
-	}
-
-	.toggle-label {
-		font-size: 13px;
-		color: var(--text-normal);
-	}
-
-	/* ========== Settings Panel ========== */
-	.settings-panel {
-		background: var(--background-primary);
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 6px;
-		overflow: hidden;
-	}
-
-	.panel-toggle {
-		width: 100%;
-		padding: 12px 16px;
-		border: none;
-		background: transparent;
-		color: var(--text-normal);
-		font-size: 14px;
-		font-weight: 500;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		transition: background-color 0.2s;
-		text-align: left;
-	}
-
-	.panel-toggle:hover {
-		background: var(--background-modifier-hover);
-	}
-
-	/* Obsidian-style collapse icon */
-	.collapse-icon {
-		color: var(--text-muted);
-		flex-shrink: 0;
-		transition: transform 0.2s ease;
-	}
-
-	.collapse-icon.is-collapsed {
-		transform: rotate(-90deg);
-	}
-
-	.setting-item-name {
-		flex: 1;
-	}
-
-	.setting-item-control {
-		width: 100%;
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 10px 12px;
-		border: none;
-		background: transparent;
-		color: var(--text-normal);
-		font-size: 13px;
-		font-weight: 500;
-		cursor: pointer;
-		transition: background-color 0.2s;
-		text-align: left;
-	}
-
-	.setting-item-control:hover {
-		background: var(--background-modifier-hover);
-	}
-
-	.panel-content {
-		background: var(--background-secondary);
-		padding: 16px;
-		border-top: 1px solid var(--background-modifier-border);
-	}
-
-	/* Settings Sections */
-	.settings-section {
-		margin-bottom: 20px;
-	}
-
-	.settings-section:last-child {
-		margin-bottom: 0;
-	}
-
-	.section-label {
-		display: block;
-		margin-bottom: 8px;
-		font-weight: 500;
-		color: var(--text-normal);
-		font-size: 13px;
-	}
-
-	.section-title {
-		margin: 0 0 10px 0;
-		font-size: 14px;
-		font-weight: 600;
-		color: var(--text-normal);
-	}
-
-	/* Collapsible Subsections */
-	.collapsible-section {
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		overflow: hidden;
-		background: var(--background-primary);
-	}
-
-	.subsection-toggle {
-		width: 100%;
-		padding: 10px 12px;
-		border: none;
-		background: transparent;
-		color: var(--text-normal);
-		font-size: 13px;
-		font-weight: 500;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		transition: background-color 0.2s;
-		text-align: left;
-	}
-
-	.subsection-toggle:hover {
-		background: var(--background-modifier-hover);
-	}
-
-	.subsection-content {
-		padding: 12px;
-		background: var(--background-secondary);
-		border-top: 1px solid var(--background-modifier-border);
-	}
-
-	/* Preview and Publish Sections */
-	.preview-section,
-	.publish-section {
-		padding: 12px;
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		background: var(--background-secondary);
-		margin-top: 8px;
-	}
-
-	/* Form Inputs */
-	.form-input {
-		width: 100%;
-		padding: 8px 12px;
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		background: var(--background-primary);
-		color: var(--text-normal);
-		font-size: 13px;
-		line-height: 1.4;
-		box-sizing: border-box;
-		min-height: 34px;
-	}
-
-	.form-input:focus {
-		outline: none;
-		border-color: var(--interactive-accent);
-	}
-
-	.form-input-readonly {
-		opacity: 0.85;
-		cursor: default;
-		background: var(--background-secondary);
-	}
-
-	.form-select {
-		width: 100%;
-		padding: 8px 12px;
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		background: var(--background-primary);
-		color: var(--text-normal);
-		font-size: 13px;
-		line-height: 1.4;
-		box-sizing: border-box;
-		min-height: 34px;
-		appearance: none;
-		background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
-		background-repeat: no-repeat;
-		background-position: right 10px center;
-		background-size: 14px;
-		padding-right: 36px;
-		cursor: pointer;
-	}
-
-	.form-select:focus {
-		outline: none;
-		border-color: var(--interactive-accent);
-	}
-
-	/* Theme Selector */
-	.theme-selector {
-		width: 100%;
-	}
-
-	.current-theme {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 8px 12px;
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		background: var(--background-primary);
-		min-height: 34px;
-		box-sizing: border-box;
-	}
-
-	.theme-name {
-		color: var(--text-normal);
-		font-size: 13px;
-		flex: 1;
-	}
-
-	.theme-actions {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-	}
-
-	.change-theme-btn,
-	.download-sample-btn {
-		padding: 4px 10px;
-		border: 1px solid var(--interactive-accent);
-		border-radius: 3px;
-		background: transparent;
-		color: var(--interactive-accent);
-		font-size: 11px;
-		cursor: pointer;
-		transition: all 0.2s;
-		white-space: nowrap;
-	}
-
-	.change-theme-btn:hover,
-	.download-sample-btn:hover {
-		background: var(--interactive-accent);
-		color: var(--text-on-accent);
-	}
-
-	.sample-download-progress {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-		min-width: 100px;
-	}
-
-	.progress-text {
-		font-size: 10px;
-		color: var(--text-muted);
-		text-align: center;
-	}
-
-	/* Publish Configuration */
-	.publish-select-wrapper {
-		margin-bottom: 12px;
-	}
-
-	.publish-config {
-		background: var(--background-primary);
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		padding: 12px;
-		margin-top: 12px;
-	}
-
-	.config-field {
-		margin-bottom: 12px;
-	}
-
-	.config-field:last-child {
-		margin-bottom: 0;
-	}
-
-	.checkbox-label {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		cursor: pointer;
-		font-size: 13px;
-		color: var(--text-normal);
-	}
-
-	.checkbox-label input[type="checkbox"] {
-		width: 16px;
-		height: 16px;
-		cursor: pointer;
-	}
-
-	.field-hint {
-		font-size: 11px;
-		color: var(--text-muted);
-		margin-top: 4px;
-		line-height: 1.4;
-	}
-
-	.license-warning {
-		font-size: 11px;
-		color: var(--text-accent);
-		border: 1px solid var(--background-modifier-error);
-		padding: 6px 10px;
-		border-radius: 3px;
-		margin-top: 8px;
-		line-height: 1.4;
-	}
-
-	/* Preview Section */
-	.action-button {
-		width: 100%;
-		padding: 8px 16px;
-		border: none;
-		border-radius: 4px;
-		background: var(--interactive-accent);
-		color: var(--text-on-accent);
-		font-size: 13px;
-		font-weight: 500;
-		cursor: pointer;
-		transition: background-color 0.2s;
-		min-height: 34px;
-	}
-
-	.action-button:hover:not(:disabled) {
-		background: var(--interactive-accent-hover);
-	}
-
-	.action-button:disabled {
-		background: var(--background-modifier-border);
-		color: var(--text-muted);
-		cursor: not-allowed;
-		opacity: 0.6;
-	}
-
-	.preview-button {
-		margin-bottom: 12px;
-	}
-
-	.preview-link {
-		margin-top: 12px;
-		padding: 10px;
-		background: var(--background-primary);
-		border-radius: 4px;
-		border: 1px solid var(--background-modifier-border);
-	}
-
-	.preview-link p {
-		margin: 0 0 6px 0;
-		font-size: 12px;
-		color: var(--text-muted);
-	}
-
-	.preview-url {
-		display: block;
-		color: var(--interactive-accent);
-		text-decoration: none;
-		font-size: 12px;
-		word-break: break-all;
-		margin-bottom: 8px;
-	}
-
-	.preview-url:hover {
-		text-decoration: underline;
-	}
-
-	.preview-actions {
-		margin-top: 8px;
-		display: flex;
-		gap: 8px;
-	}
-
-	.export-button {
-		background: var(--interactive-normal);
-		color: var(--text-normal);
-		border: 1px solid var(--background-modifier-border);
-	}
-
-	.export-button:hover:not(:disabled) {
-		background: var(--interactive-hover);
-	}
-
-	.progress-container {
-		margin: 8px 0;
-	}
-
-	.progress-container p {
-		margin: 0 0 8px 0;
-		color: var(--text-muted);
-		font-size: 12px;
-	}
-
-	/* Advanced Settings */
-	.advanced-field {
-		margin-bottom: 16px;
-	}
-
-	.advanced-field:last-child {
-		margin-bottom: 0;
-	}
-
-	/* Multi-language Table */
-	.multilang-table {
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		overflow: hidden;
-		background: var(--background-primary);
-	}
-
-	.multilang-header {
-		display: grid;
-		grid-template-columns: 1fr 2fr;
-		background: var(--background-secondary);
-		border-bottom: 1px solid var(--background-modifier-border);
-	}
-
-	.multilang-header-cell {
-		padding: 8px 10px;
-		font-weight: 500;
-		font-size: 12px;
-		color: var(--text-normal);
-		border-right: 1px solid var(--background-modifier-border);
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		overflow: hidden;
-		min-width: 0;
-	}
-
-	.multilang-header-cell:last-child {
-		border-right: none;
-	}
-
-	.add-language-btn {
-		padding: 3px 6px;
-		border: 1px solid var(--interactive-accent);
-		border-radius: 3px;
-		background: transparent;
-		color: var(--interactive-accent);
-		font-size: 10px;
-		cursor: pointer;
-		transition: all 0.2s;
-		white-space: nowrap;
-		margin-left: 6px;
-	}
-
-	.add-language-btn:hover {
-		background: var(--interactive-accent);
-		color: var(--text-on-accent);
-	}
-
-	.multilang-row {
-		display: grid;
-		grid-template-columns: 1fr 2fr;
-		border-bottom: 1px solid var(--background-modifier-border);
-		transition: background-color 0.2s;
-	}
-
-	.multilang-row:last-child {
-		border-bottom: none;
-	}
-
-	.multilang-row:hover {
-		background: var(--background-modifier-hover);
-	}
-
-	.multilang-cell {
-		padding: 8px 10px;
-		display: flex;
-		align-items: center;
-		border-right: 1px solid var(--background-modifier-border);
-		min-height: 34px;
-		box-sizing: border-box;
-		overflow: hidden;
-		min-width: 0;
-	}
-
-	.multilang-cell:last-child {
-		border-right: none;
-	}
-
-	.content-path-cell {
-		gap: 6px;
-	}
-
-	.multilang-cell .content-path {
-		color: var(--text-normal);
-		font-size: 12px;
-		flex: 1;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		min-width: 0;
-	}
-
-	.default-badge {
-		background: var(--interactive-accent);
-		color: var(--text-on-accent);
-		padding: 2px 5px;
-		border-radius: 3px;
-		font-size: 10px;
-		font-weight: 500;
-		white-space: nowrap;
-	}
-
-	.language-cell {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-	}
-
-	.language-select {
-		flex: 1;
-		max-width: 160px;
-		padding: 4px 8px;
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 3px;
-		background: var(--background-primary);
-		color: var(--text-normal);
-		font-size: 12px;
-		appearance: none;
-		background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
-		background-repeat: no-repeat;
-		background-position: right 5px center;
-		background-size: 10px;
-		padding-right: 20px;
-		cursor: pointer;
-	}
-
-	.remove-btn {
-		width: 18px;
-		height: 18px;
-		border: none;
-		border-radius: 50%;
-		background: transparent;
-		color: var(--text-muted);
-		font-size: 14px;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		transition: all 0.2s;
-		opacity: 0;
-		margin-left: 4px;
-	}
-
-	.multilang-row:hover .remove-btn {
-		opacity: 1;
-	}
-
-	.remove-btn:hover {
-		background: var(--background-modifier-error);
-		color: var(--text-on-accent);
-		transform: scale(1.1);
-	}
-
-	.remove-icon {
-		line-height: 1;
-		font-weight: bold;
-	}
-
-	.multilang-empty {
-		padding: 16px;
-		text-align: center;
-		color: var(--text-muted);
-		font-style: italic;
-	}
-
-	.empty-message {
-		font-size: 12px;
-	}
-
-	/* Site Assets */
-	.site-assets-container {
-		border: 1px solid var(--background-modifier-border);
-		border-radius: 4px;
-		background: var(--background-primary);
-	}
-
-	.assets-display {
-		padding: 8px 10px;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		min-height: 34px;
-		box-sizing: border-box;
-	}
-
-	.assets-path {
-		color: var(--text-normal);
-		font-size: 12px;
-		flex: 1;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		min-width: 0;
-	}
-
-	.assets-placeholder {
-		color: var(--text-muted);
-		font-size: 12px;
-		font-style: italic;
-		flex: 1;
-	}
-
-	.clear-assets-btn {
-		padding: 3px 6px;
-		border: 1px solid var(--interactive-accent);
-		border-radius: 3px;
-		background: transparent;
-		color: var(--interactive-accent);
-		font-size: 10px;
-		cursor: pointer;
-		transition: all 0.2s;
-		white-space: nowrap;
-		margin-left: 6px;
-	}
-
-	.clear-assets-btn:hover {
-		background: var(--interactive-accent);
-		color: var(--text-on-accent);
-	}
-
-	.assets-hint {
-		padding: 6px 10px;
-		background: var(--background-secondary);
-		border-top: 1px solid var(--background-modifier-border);
-		font-size: 11px;
-		color: var(--text-muted);
-		line-height: 1.4;
-	}
-
-	/* Panel header layout */
-	.panel-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.panel-header-left {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		min-width: 0;
-		flex: 1;
-	}
-</style> 

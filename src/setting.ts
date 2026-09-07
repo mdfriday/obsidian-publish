@@ -275,8 +275,8 @@ export class FridaySettingTab extends PluginSettingTab {
 				)
 				.addDropdown((dropdown) => {
 					dropdown
-						.addOption('auto', 'Auto (local if running)')
-						.addOption('local', 'Local (127.0.0.1)')
+						.addOption('local', 'Local (127.0.0.1) — default for development')
+						.addOption('auto', 'Auto (local if running, else staging)')
 						.addOption('staging', 'Staging (fsky.top)')
 						.addOption('production', 'Production')
 						.setValue(env)

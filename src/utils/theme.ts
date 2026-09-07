@@ -8,8 +8,12 @@ export const DEFAULT_THEME_SLUGS = {
 	QUARTZ: 'quartz',
 } as const;
 
-export function shouldUseInternalRenderer(themeTags: readonly string[] = []): boolean {
-	return !themeTags.some((t) => t.toLowerCase() === 'obsidian');
+/**
+ * Themed builds always use Foundry's default MarkdownIt renderer.
+ * Obsidian-tag local render was removed (Phase 1.5); use PublishMode=faithful instead.
+ */
+export function shouldUseInternalRenderer(_themeTags: readonly string[] = []): boolean {
+	return true;
 }
 
 export async function resolveDefaultTheme(

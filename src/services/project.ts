@@ -671,32 +671,43 @@ export class ProjectServiceManager {
 
 	/**
 	 * One-shot Cloudflare publish: bind → set baseURL → build → upload.
+	 * Pass skipBuild=true when public/ was already filled (faithful build).
 	 */
 	async buildAndPublishCloudflare(
 		projectName: string,
 		options: {
 			onProgress?: (progress: ProgressUpdate | PublishProgressUpdate) => void;
+			/** Skip Foundry SSG — public/ already written (PublishMode=faithful) */
+			skipBuild?: boolean;
 		} = {},
 	): Promise<PublishResult & { baseURL?: string; siteId?: string }> {
-		const { onProgress } = options;
+		const { onProgress, skipBuild = false } = options;
 
 		const ensured = await this.ensureShareBaseUrl(projectName);
 		if ('error' in ensured) {
 			return { success: false, error: ensured.error };
 		}
 
-		onProgress?.({
-			phase: 'building',
-			percentage: 0,
-			message: 'Building site…',
-		} as ProgressUpdate);
+		if (skipBuild) {
+			onProgress?.({
+				phase: 'building',
+				percentage: 100,
+				message: 'Faithful package ready',
+			} as ProgressUpdate);
+		} else {
+			onProgress?.({
+				phase: 'building',
+				percentage: 0,
+				message: 'Building site…',
+			} as ProgressUpdate);
 
-		const buildResult = await this.build(projectName, (progress) => {
-			onProgress?.(progress);
-		});
+			const buildResult = await this.build(projectName, (progress) => {
+				onProgress?.(progress);
+			});
 
-		if (!buildResult.success) {
-			return { success: false, error: buildResult.error || 'Build failed' };
+			if (!buildResult.success) {
+				return { success: false, error: buildResult.error || 'Build failed' };
+			}
 		}
 
 		const publishResult = await this.publish(projectName, {

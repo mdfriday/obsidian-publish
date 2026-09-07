@@ -44,6 +44,9 @@ export interface SiteEventData {
 	};
 	buildAndPublishRequested: {
 		projectName: string;
+		/** When true, skip Foundry SSG (faithful already wrote public/) */
+		skipBuild?: boolean;
+		/** @deprecated Phase 1.5 — custom OB renderer removed */
 		renderer?: any;
 	};
 	testConnection: {

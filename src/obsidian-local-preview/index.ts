@@ -18,6 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'crypto';
+import { buildEncryptGateHtml, encryptAESGCM } from './encrypt';
 
 export type ThemeSnapshot = {
 	generatedAt: number;
@@ -52,6 +53,8 @@ export type LocalPreviewResult = {
 export type LocalPreviewOptions = {
 	file: TFile;
 	title?: string;
+	/** When set, AES-GCM gate (same as Foundry theme encrypt cap) */
+	password?: string;
 };
 
 export type ThemeClassBundle = {
@@ -816,32 +819,29 @@ export function stopAllLocalPreviewServers(): void {
 	}
 }
 
+export type FaithfulPackageResult = {
+	rootDir: string;
+	htmlPath: string;
+	snapshotPath: string;
+};
+
 /**
- * Package a single note into static HTML + Theme Snapshot for local serve.
- * Always rebuilds from the current Obsidian config (dynamic).
+ * Write a single-note faithful static package into `absRoot`
+ * (Theme Snapshot + MarkdownRenderer). Used by both tmp preview and
+ * Foundry `projects/<name>/public/`.
  */
-export async function packageSingleNotePreview(
+export async function writeFaithfulPackage(
 	plugin: Plugin,
-	opts: LocalPreviewOptions,
-): Promise<LocalPreviewResult> {
-	const { file } = opts;
-	const absRoot = path.join(
-		os.tmpdir(),
-		`mdf-local-preview-${createHash('sha1')
-			.update(`${file.path}-${Date.now()}`)
-			.digest('hex')
-			.slice(0, 10)}`,
-	);
+	opts: LocalPreviewOptions & { absRoot: string },
+): Promise<FaithfulPackageResult> {
+	const { file, absRoot } = opts;
 	await fs.promises.mkdir(absRoot, { recursive: true });
 
-	// Snapshot — write assets under the package root so static server can
-	// resolve rewritten font/image URLs.
 	const assetsDir = path.join(absRoot, 'assets');
 	const snapshot = await exportThemeSnapshot(plugin, assetsDir);
 	const snapshotDir = path.join(absRoot, 'theme-snapshot');
 	await writeThemeSnapshot(snapshotDir, snapshot);
 
-	// Render
 	const source = await plugin.app.vault.read(file);
 	const themeClasses = detectThemeClasses(snapshot.css.theme);
 	const preferDark = preferDarkMode();
@@ -849,23 +849,45 @@ export async function packageSingleNotePreview(
 	const allThemeClasses = [...new Set([...themeClasses, ...classSelect])];
 	const themeClassAttr = allThemeClasses.join(' ');
 
-	// Rebuild with more complete class list for render
 	const rendered = await renderNoteWithObsidian(plugin, file, source, allThemeClasses);
 
-	// Build final index.html
+	const contentInner = `
+  <div class="obsidian-content-wrapper">
+    <div class="markdown-preview-view markdown-rendered ${escapeHtml(themeClassAttr)}">
+      ${rendered.html}
+    </div>
+  </div>
+  <footer class="mdfriday-built-with">
+    Built with <a href="https://mdfriday.com" target="_blank" rel="noopener noreferrer">MDFriday</a>
+  </footer>`;
+
+	const password = (opts.password || '').trim();
+	let bodyMain = contentInner;
+	let encryptHead = '';
+	if (password) {
+		const encrypted = encryptAESGCM(password, contentInner);
+		const gate = buildEncryptGateHtml({
+			encryptedBase64: encrypted,
+			level: 'page',
+			path: '/',
+			titleZh: '这篇笔记已加密，请输入密码解锁。',
+		});
+		bodyMain = gate.bodyInner;
+		encryptHead = gate.headExtra;
+	}
+
 	const indexHtmlPath = path.join(absRoot, 'index.html');
 	// Scroll fix: app.css / theme often set html,body { height:100% }
 	// and .markdown-preview-view { height:100%; overflow-y:auto }.
-	// In Obsidian that is correct (workspace layout). In a static package
-	// that locks height to the viewport and blocks document scroll.
-	// Force document-level scrolling for the static preview.
+	// Force document-level scrolling for the static package.
 	const html = `
 <!DOCTYPE html>
 <html lang="zh-cn" class="${escapeHtml(themeClassAttr)}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(rendered.title)} · MDFriday Local Preview</title>
+  <title>${escapeHtml(rendered.title)} · MDFriday</title>
+  ${encryptHead}
   <style>
 /* core */
 ${snapshot.css.core}
@@ -913,28 +935,69 @@ ${snapshot.css.vars}
   </style>
 </head>
 <body style="overflow: auto; -webkit-user-select: text; -moz-user-select: text; user-select: text;" class="${escapeHtml(themeClassAttr)}">
-  <div class="obsidian-content-wrapper">
-    <div class="markdown-preview-view markdown-rendered ${escapeHtml(themeClassAttr)}">
-      ${rendered.html}
-    </div>
-  </div>
-  <footer class="mdfriday-built-with">
-    Built with <a href="https://mdfriday.com" target="_blank" rel="noopener noreferrer">MDFriday</a>
-  </footer>
+  ${bodyMain}
 </body>
 </html>
 `;
 	await fs.promises.writeFile(indexHtmlPath, html);
 
-	// Serve
-	const server = await startStaticServer(absRoot);
-	activeServers.push(server);
 	return {
-		url: server.url,
 		rootDir: absRoot,
 		htmlPath: indexHtmlPath,
 		snapshotPath: snapshotDir,
 	};
+}
+
+/**
+ * Faithful build into a Foundry project `public/` directory.
+ * Clears existing public contents so preview/publish share one artifact.
+ */
+export async function buildFaithfulToProject(
+	plugin: Plugin,
+	opts: LocalPreviewOptions & { publicDir: string },
+): Promise<FaithfulPackageResult> {
+	const { file, publicDir } = opts;
+	await fs.promises.rm(publicDir, { recursive: true, force: true });
+	return writeFaithfulPackage(plugin, { file, absRoot: publicDir, title: opts.title });
+}
+
+/**
+ * Package a single note into tmpdir + local static server (dev convenience).
+ * Prefer buildFaithfulToProject for preview/publish that must share Foundry public/.
+ */
+export async function packageSingleNotePreview(
+	plugin: Plugin,
+	opts: LocalPreviewOptions,
+): Promise<LocalPreviewResult> {
+	const { file } = opts;
+	const absRoot = path.join(
+		os.tmpdir(),
+		`mdf-local-preview-${createHash('sha1')
+			.update(`${file.path}-${Date.now()}`)
+			.digest('hex')
+			.slice(0, 10)}`,
+	);
+	const packaged = await writeFaithfulPackage(plugin, { file, absRoot, title: opts.title });
+	const server = await startStaticServer(packaged.rootDir);
+	activeServers.push(server);
+	return {
+		url: server.url,
+		rootDir: packaged.rootDir,
+		htmlPath: packaged.htmlPath,
+		snapshotPath: packaged.snapshotPath,
+	};
+}
+
+/**
+ * Serve an existing directory (e.g. Foundry project public/) with a static server.
+ */
+export async function serveFaithfulPublicDir(
+	publicDir: string,
+): Promise<{ url: string; stop: () => void }> {
+	stopAllLocalPreviewServers();
+	const server = await startStaticServer(publicDir);
+	activeServers.push(server);
+	return server;
 }
 
 /**
@@ -1018,14 +1081,14 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Helper: determine if a theme is Foundry-mode (uses MarkdownIt), not Obsidian.
- * TAG with "obsidian" → Obsidian snapshot path
- * TAG without OBSIDIAN → Foundry path
+ * @deprecated Phase 1.5 — obsidian-tag local render removed.
+ * Single-note look-alike is PublishMode=faithful; themed always uses Foundry SSG.
  */
-export function isObsidianThemeMode(tags: string[] = []): boolean {
-	return tags.some((t) => t.toLowerCase() === 'obsidian');
+export function isObsidianThemeMode(_tags: string[] = []): boolean {
+	return false;
 }
 
-export function isFoundryThemeMode(tags: string[] = []): boolean {
-	return !isObsidianThemeMode(tags);
+/** @deprecated Phase 1.5 — always true for themed builds */
+export function isFoundryThemeMode(_tags: string[] = []): boolean {
+	return true;
 }

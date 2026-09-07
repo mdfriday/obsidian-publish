@@ -28,11 +28,7 @@
 		(r) => r.state === 'published' || r.state === 'superseded',
 	);
 	$: canRollback = hostingMode === 'custom';
-	$: summaryLine = !remoteProjectId
-		? '—'
-		: published.length
-			? `${published.length} release${published.length === 1 ? '' : 's'}`
-			: 'Empty';
+	$: summaryLine = String(published.length);
 
 	async function toggle() {
 		expanded = !expanded;
@@ -124,27 +120,29 @@
 	}
 </script>
 
-<div class="capability-section">
+<div class="capability-section mdf-fold">
 	<button
 		type="button"
-		class="subsection-toggle"
+		class="subsection-toggle mdf-fold-toggle"
 		on:click={toggle}
 		aria-expanded={expanded}
 	>
+		<span class="setting-item-name">{plugin.i18n?.t?.('ui.history') || 'History'}</span>
+		<span class="capability-sep" aria-hidden="true">·</span>
+		<span class="history-count-badge">{summaryLine}</span>
 		<svg
-			class="collapse-icon"
-			class:is-collapsed={!expanded}
+			class="mdf-fold-chevron"
+			class:is-open={expanded}
 			width="14"
 			height="14"
 			viewBox="0 0 24 24"
 			fill="none"
 			stroke="currentColor"
 			stroke-width="2"
+			aria-hidden="true"
 		>
-			<polyline points="6 9 12 15 18 9"></polyline>
+			<polyline points="9 18 15 12 9 6"></polyline>
 		</svg>
-		<span class="setting-item-name">History</span>
-		<span class="capability-summary">{summaryLine}</span>
 	</button>
 
 	{#if expanded}
@@ -260,5 +258,23 @@
 	.capability-status {
 		margin: 0;
 		font-size: 12px;
+	}
+
+	.capability-sep {
+		flex-shrink: 0;
+		margin: 0 2px;
+		color: var(--text-muted);
+		font-weight: 400;
+	}
+
+	.mdf-fold-chevron {
+		flex-shrink: 0;
+		margin-left: auto;
+		color: var(--text-faint, var(--text-muted));
+		transition: transform 0.12s ease;
+	}
+
+	.mdf-fold-chevron.is-open {
+		transform: rotate(90deg);
 	}
 </style>

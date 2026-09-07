@@ -56,6 +56,13 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--text-normal);
+  margin-right: 4px;
+}
+
+.site-builder .capability-sep {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .site-builder .capability-summary {

@@ -1,13 +1,37 @@
-/* MDFriday design tokens — arch/15 appendix B.1 */
+/* MDFriday design tokens — design PNG sampled; Obsidian vars as soft fallbacks */
 .site-builder,
 .friday-setting-tab,
 .friday-theme-modal,
 .friday-cloudflare-projects-modal {
-  --mdf-primary: #635bff;
-  --mdf-primary-soft: rgba(99, 91, 255, 0.08);
-  --mdf-border: var(--background-modifier-border);
-  --mdf-error: var(--text-error);
-  --mdf-radius-sm: 0.625rem;
-  --mdf-radius-md: 0.75rem;
-  --mdf-accent: var(--interactive-accent, var(--mdf-primary));
+  --mdf-panel: #eff1f5;
+  --mdf-card: #ffffff;
+  --mdf-soft: #e7e9ee;
+  --mdf-stroke: #bdc0cb;
+  --mdf-ink: #2e303b;
+  --mdf-muted: #4d4f67;
+  --mdf-hint: #8b8fa3;
+  --mdf-primary: #9375ef;
+  --mdf-danger: #e05454;
+  --mdf-radius: 8px;
+  --mdf-gap: 12px;
+  --mdf-border: var(--mdf-stroke, var(--background-modifier-border));
+  --mdf-error: var(--mdf-danger, var(--text-error));
+  --mdf-radius-sm: 6px;
+  --mdf-radius-md: 8px;
+  --mdf-accent: var(--mdf-primary);
+  --mdf-primary-soft: rgba(147, 117, 239, 0.12);
+}
+
+/* Sticky account footer needs a filled view height */
+.workspace-leaf-content[data-type="Friday_Service"] {
+  height: 100%;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .view-content {
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--mdf-panel, #eff1f5);
 }

@@ -57,6 +57,11 @@ interface FridaySettings {
 	mdfQuotaFeatures: string[] | null;
 	/** Set after first successful Cloudflare publish (Growth Card) */
 	hasPublishedOnce: boolean;
+	/**
+	 * Per vault-path publish UI config (mode / theme / hasPasswordFlag).
+	 * Never stores password plaintext — submitted only at publish time.
+	 */
+	pathConfigs: Record<string, import('./types/publish-config').PathPublishConfig>;
 	/** @deprecated migrated to mdfKey */
 	cloudflareGuestToken?: string | null;
 	/** @deprecated migrated away — JWT not stored in plugin */
@@ -89,7 +94,9 @@ const DEFAULT_SETTINGS: FridaySettings = {
 	mdfQuotaMaxCustomDomains: null,
 	mdfQuotaFeatures: null,
 	hasPublishedOnce: false,
-	cloudflareEnv: 'auto',
+	pathConfigs: {},
+	/** Prefer local ControlPlane (`npm run local`) for development. */
+	cloudflareEnv: 'local',
 	cloudflareResolvedEnv: null,
 	cloudflareApiBaseUrl: 'https://api.fsky.top',
 	cloudflarePublicBaseUrl: 'https://share.fsky.top',
@@ -336,27 +343,13 @@ export default class FridayPlugin extends Plugin {
 			},
 		});
 		
-		// Register context menu for files and folders (PC-only)
+		// Register context menu for files and folders (PC-only):
+		// single entry — Publish to MDFriday (auto build + publish).
 		this.registerEvent(
 			this.app.workspace.on('file-menu', (menu, file) => {
 				if (file instanceof TFolder) {
-					this.addToPublishListMenuItem(menu, file);
-					// Add site assets menu item
-					menu.addItem(item => {
-						item
-							.setTitle(this.i18n.t('menu.set_as_site_assets'))
-							.setIcon('folder-plus')
-							.onClick(async () => {
-								await this.setSiteAssets(file);
-							});
-					});
-					
-					menu.addSeparator();
 					this.addPublishMenuItems(menu, file);
-
 				} else if (file instanceof TFile && file.extension === 'md') {
-					this.addToPublishListMenuItem(menu, file);
-					menu.addSeparator();
 					this.addPublishMenuItems(menu, file);
 				}
 			})
@@ -408,13 +401,13 @@ export default class FridayPlugin extends Plugin {
 	}
 
 	/**
-	 * Single Cloudflare publish entry in file/folder menus.
+	 * Single publish entry in file/folder menus: open panel + auto publish.
 	 */
 	private addPublishMenuItems(menu: Menu, fileOrFolder: TFile | TFolder) {
 		menu.addItem(item => {
 			item
 				.setTitle(this.i18n.t('menu.publish_to_web'))
-				.setIcon('globe')
+				.setIcon(FRIDAY_ICON)
 				.onClick(async () => {
 					await this.publishToWeb(fileOrFolder);
 				});
@@ -880,8 +873,20 @@ export default class FridayPlugin extends Plugin {
 		}
 
 		const onProgress = (progress: any) => {
+			// Single progress bar under Publish button owns the whole pipeline
 			if (progress.phase === 'building' || progress.phase === 'build-success') {
 				this.siteComponent?.updateBuildProgress?.(progress);
+				if (this.siteComponent?.updatePublishProgress) {
+					const pct =
+						progress.phase === 'build-success'
+							? 40
+							: Math.min(40, (progress.percentage ?? 0) * 0.4);
+					this.siteComponent.updatePublishProgress({
+						phase: 'scanning',
+						percentage: pct,
+						message: progress.message,
+					});
+				}
 			} else {
 				this.siteComponent?.updatePublishProgress?.(progress);
 			}
@@ -889,7 +894,7 @@ export default class FridayPlugin extends Plugin {
 
 		const result = await this.projectServiceManager.buildAndPublishCloudflare(
 			data.projectName,
-			{ onProgress },
+			{ onProgress, skipBuild: !!data.skipBuild },
 		);
 
 		if (result.success) {
@@ -1388,17 +1393,9 @@ export default class FridayPlugin extends Plugin {
 				return;
 			}
 			
-			// Create a menu
+			// Create a menu — single Publish to MDFriday entry
 			const menu = new Menu();
-			
-			this.addToPublishListMenuItem(menu, file);
-			
-			menu.addSeparator();
-			
-			// Add all publish options using helper method
 			this.addPublishMenuItems(menu, file);
-			
-			// Show the menu at the cursor position
 			menu.showAtMouseEvent(e as MouseEvent);
 		});
 
@@ -1408,6 +1405,10 @@ export default class FridayPlugin extends Plugin {
 
 	/**
 	 * Cloudflare-only publish: open panel and trigger auto-publish.
+	 */
+	/**
+	 * Right-click "Publish to MDFriday": open panel, apply defaults, publish immediately.
+	 * Note → faithful; folder → themed + default theme. Ignores saved path config.
 	 */
 	private async publishToWeb(fileOrFolder: TFile | TFolder) {
 		if (fileOrFolder instanceof TFile && fileOrFolder.extension !== 'md') {
@@ -1429,10 +1430,11 @@ export default class FridayPlugin extends Plugin {
 			}
 
 			await new Promise(resolve => setTimeout(resolve, 500));
-
 			await new Promise(resolve => setTimeout(resolve, 100));
 
-			if (this.siteComponent?.startPublish) {
+			if (this.siteComponent?.applyDefaultsAndPublish) {
+				await this.siteComponent.applyDefaultsAndPublish();
+			} else if (this.siteComponent?.startPublish) {
 				await this.siteComponent.startPublish();
 			}
 		} catch (error) {
@@ -1601,6 +1603,9 @@ export default class FridayPlugin extends Plugin {
 		this.previousDownloadServer = this.settings.downloadServer;
 		if (!this.settings.cloudflareEnv) {
 			this.settings.cloudflareEnv = 'auto';
+		}
+		if (!this.settings.pathConfigs) {
+			this.settings.pathConfigs = {};
 		}
 		// Migrate legacy guest token → mdfKey (one-shot)
 		if (!this.settings.mdfKey && this.settings.cloudflareGuestToken) {
