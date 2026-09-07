@@ -32,13 +32,35 @@
 		['personal', 'pro'].includes((plugin.settings.mdfKeyPlan || '').toLowerCase());
 
 	$: t = plugin.i18n?.t || ((key: string) => key);
-	$: summaryLine = activeHostname
-		? activeHostname
-		: !canDomain
-			? t('ui.account_domain_personal_only')
-			: remoteProjectId
-				? t('ui.domain_not_bound')
-				: '—';
+	$: hasKey = !!plugin.settings.mdfKey;
+	$: domainStatusKey = (() => {
+		const st = `${domainStatus} ${certStatus} ${sslStatus}`.toLowerCase();
+		const looksError =
+			/\b(fail|error|invalid|expired|misconfig)/.test(st) ||
+			sslStatus.toLowerCase().includes('fail');
+		if (activeHostname) return 'active' as const;
+		if (domainId || step === 'dns' || step === 'ssl') {
+			return looksError ? ('error' as const) : ('pending' as const);
+		}
+		if (!hasKey) return 'need_auth' as const;
+		if (!remoteProjectId) return 'publish_first' as const;
+		if (!canDomain) return 'upgrade' as const;
+		return 'not_configured' as const;
+	})();
+	$: summaryLine =
+		domainStatusKey === 'active'
+			? activeHostname || t('ui.domain_status_active')
+			: domainStatusKey === 'pending'
+				? t('ui.domain_status_pending')
+				: domainStatusKey === 'error'
+					? t('ui.domain_status_error')
+					: domainStatusKey === 'need_auth'
+						? t('ui.domain_status_need_auth')
+						: domainStatusKey === 'publish_first'
+							? t('ui.domain_status_publish_first')
+							: domainStatusKey === 'upgrade'
+								? t('ui.domain_status_upgrade')
+								: t('ui.domain_status_not_configured');
 	$: domainTitle = t('ui.custom_domain');
 
 	async function toggle() {
@@ -350,12 +372,13 @@
 		<div class="capability-body">
 			{#if loading}
 				<p class="field-hint">Loading…</p>
+			{:else if !hasKey}
+				<p class="field-hint">{t('ui.domain_need_auth_hint')}</p>
+				<button class="mod-cta" on:click={openAccountUpgrade}>{t('ui.account_go_verify')}</button>
 			{:else if !remoteProjectId}
-				<p class="field-hint">Publish this site once to bind a custom domain.</p>
+				<p class="field-hint">{t('ui.domain_publish_first_hint')}</p>
 			{:else if !canDomain && step !== 'done'}
-				<p class="field-hint">
-					{t('ui.account_domain_personal_only')} — {t('ui.account_upgrade_personal')}
-				</p>
+				<p class="field-hint">{t('ui.domain_upgrade_hint')}</p>
 				<button class="mod-cta" on:click={openAccountUpgrade}>{t('ui.account_upgrade_personal')}</button>
 			{:else}
 				{#if step !== 'done'}

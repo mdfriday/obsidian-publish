@@ -30,6 +30,9 @@
 			<div class="mdf-label">{label}</div>
 			<div class="mdf-fixed">{folderFixedLabel}</div>
 		</div>
+		{#if hint}
+			<p class="mdf-hint">{hint}</p>
+		{/if}
 	{:else}
 		<div class="mdf-label">{label}</div>
 		<div class="mdf-seg" role="group" aria-label={label}>
@@ -75,6 +78,7 @@
 <style>
 	.mdf-mode {
 		padding: 10px 0;
+		border: none;
 		border-bottom: 1px solid var(--mdf-stroke, #bdc0cb);
 	}
 	.mdf-mode-top {

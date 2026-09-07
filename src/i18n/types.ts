@@ -381,6 +381,7 @@ export interface TranslationNamespace {
 		mode_themed: string;
 		mode_faithful_hint: string;
 		mode_themed_hint: string;
+		mode_folder_hint: string;
 		badge_note: string;
 		badge_wiki: string;
 		password_hint_note: string;
@@ -427,6 +428,17 @@ export interface TranslationNamespace {
 		mode_themed_fixed: string;
 		custom_domain: string;
 		domain_not_bound: string;
+		domain_status_need_auth: string;
+		domain_status_publish_first: string;
+		domain_status_upgrade: string;
+		domain_status_not_configured: string;
+		domain_status_pending: string;
+		domain_status_active: string;
+		domain_status_error: string;
+		domain_need_auth_hint: string;
+		domain_publish_first_hint: string;
+		domain_upgrade_hint: string;
+		output_empty_both: string;
 		history: string;
 		publish_auth_tip: string;
 		site_password_confirm_placeholder: string;

@@ -113,7 +113,7 @@
 				label={t('ui.publish_mode')}
 				faithfulLabel={t('ui.mode_faithful')}
 				themedLabel={t('ui.mode_themed')}
-				hint=""
+				hint={t('ui.mode_folder_hint')}
 				onChange={onSetMode}
 				folderFixed
 				folderFixedLabel={t('ui.mode_themed_fixed')}
@@ -173,6 +173,7 @@
 			revokeLabel={t('ui.revoke_share')}
 			emptyOnline={t('ui.output_empty_online')}
 			emptyPreview={t('ui.output_empty_preview')}
+			emptyBoth={t('ui.output_empty_both')}
 			tab={outputTab}
 			onlineUrl={publishUrl}
 			{previewUrl}

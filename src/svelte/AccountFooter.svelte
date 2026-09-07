@@ -80,7 +80,7 @@
 				<div class="af-sub">{t('ui.account_guest_unverified_sub')}</div>
 			</div>
 			<div class="af-actions">
-				<button class="af-cta" type="button" on:click={openAuth}>
+				<button class="af-link" type="button" on:click={openAuth}>
 					{t('ui.account_go_verify')} ↗
 				</button>
 			</div>
@@ -97,11 +97,10 @@
 				<div class="af-title">{t('ui.account_guest_ready_title')}</div>
 				<div class="af-sub">{t('ui.account_guest_ready_sub')}</div>
 			</div>
-			<div class="af-actions af-links">
+			<div class="af-actions">
 				<button class="af-link" type="button" on:click={openClaimFree}>
 					{t('ui.account_claim_free')}
 				</button>
-				<span class="af-sep" aria-hidden="true">·</span>
 				<button class="af-link" type="button" on:click={openUpgradePersonal}>
 					{t('ui.account_upgrade_personal')}
 				</button>
@@ -119,15 +118,13 @@
 				<div class="af-title">{freeTitle}</div>
 				<div class="af-sub">{t('ui.account_free_sub')}</div>
 			</div>
-			<div class="af-actions af-links">
+			<div class="af-actions">
 				<button class="af-link" type="button" on:click={openManageAccount}>
 					{t('ui.account_manage')} ↗
 				</button>
-				<span class="af-sep" aria-hidden="true">·</span>
 				<button class="af-link" type="button" on:click={openUpgradePersonal}>
 					{t('ui.account_upgrade_personal')}
 				</button>
-				<span class="af-sep" aria-hidden="true">·</span>
 				<span class="af-price">{t('ui.account_personal_price')}</span>
 			</div>
 		</div>
@@ -162,7 +159,7 @@
 
 	.af-card {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 10px;
 		padding: 10px 12px;
 		border: 1px solid var(--mdf-stroke, #bdc0cb);
@@ -178,6 +175,7 @@
 		justify-content: center;
 		width: 28px;
 		height: 28px;
+		margin-top: 1px;
 		border-radius: 50%;
 		background: var(--mdf-soft, #e7e9ee);
 		color: var(--mdf-hint, #8b8fa3);
@@ -194,9 +192,6 @@
 		font-weight: 600;
 		color: var(--mdf-ink, #2e303b);
 		line-height: 1.35;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
 	}
 
 	.af-sub {
@@ -209,33 +204,11 @@
 	.af-actions {
 		flex-shrink: 0;
 		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-	}
-
-	.af-links {
-		flex-wrap: wrap;
-		gap: 0 2px;
-		max-width: 48%;
-		justify-content: flex-end;
-	}
-
-	.af-cta {
-		padding: 0 10px;
-		height: 28px;
-		border: none;
-		border-radius: 6px;
-		background: var(--mdf-primary, #9375ef);
-		color: #fff;
-		font-family: var(--font-interface);
-		font-size: 12px;
-		font-weight: 600;
-		cursor: pointer;
-		white-space: nowrap;
-	}
-
-	.af-cta:hover {
-		opacity: 0.92;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 4px;
+		text-align: right;
+		max-width: 46%;
 	}
 
 	.af-link {
@@ -247,25 +220,21 @@
 		font-size: 11px;
 		font-weight: 500;
 		cursor: pointer;
-		white-space: nowrap;
-		line-height: 1.3;
+		line-height: 1.35;
+		text-align: right;
+		white-space: normal;
 	}
 
 	.af-link:hover {
 		opacity: 0.85;
-	}
-
-	.af-sep {
-		color: var(--mdf-hint, #8b8fa3);
-		font-size: 11px;
-		padding: 0 2px;
-		user-select: none;
+		text-decoration: underline;
 	}
 
 	.af-price {
 		color: var(--mdf-hint, #8b8fa3);
 		font-size: 11px;
 		font-weight: 500;
-		white-space: nowrap;
+		line-height: 1.35;
+		text-align: right;
 	}
 </style>
