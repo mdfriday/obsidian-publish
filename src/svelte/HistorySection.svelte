@@ -168,8 +168,8 @@
 			{:else}
 				{#if !canRollback}
 					<p class="field-hint">
-						Rollback restores a previous release on your custom domain. Share links always
-						show the latest publish — bind a domain to enable rollback.
+						{plugin.i18n?.t?.('ui.account_history_personal_only') ||
+							'Rollback requires Personal (and a custom domain)'}
 					</p>
 				{/if}
 

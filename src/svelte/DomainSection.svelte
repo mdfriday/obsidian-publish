@@ -34,9 +34,11 @@
 	$: t = plugin.i18n?.t || ((key: string) => key);
 	$: summaryLine = activeHostname
 		? activeHostname
-		: remoteProjectId
-			? t('ui.domain_not_bound')
-			: '—';
+		: !canDomain
+			? t('ui.account_domain_personal_only')
+			: remoteProjectId
+				? t('ui.domain_not_bound')
+				: '—';
 	$: domainTitle = t('ui.custom_domain');
 
 	async function toggle() {
@@ -352,9 +354,9 @@
 				<p class="field-hint">Publish this site once to bind a custom domain.</p>
 			{:else if !canDomain && step !== 'done'}
 				<p class="field-hint">
-					Custom domains require Personal / Pro. Upgrade from Account.
+					{t('ui.account_domain_personal_only')} — {t('ui.account_upgrade_personal')}
 				</p>
-				<button class="mod-cta" on:click={openAccountUpgrade}>Upgrade…</button>
+				<button class="mod-cta" on:click={openAccountUpgrade}>{t('ui.account_upgrade_personal')}</button>
 			{:else}
 				{#if step !== 'done'}
 					<label class="section-label" for="domain-hostname">Domain</label>

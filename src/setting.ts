@@ -30,6 +30,7 @@ function clearAccountSnapshot(plugin: FridayPlugin): void {
 	plugin.settings.mdfQuotaRetentionDays = null;
 	plugin.settings.mdfQuotaMaxCustomDomains = null;
 	plugin.settings.mdfQuotaFeatures = null;
+	plugin.settings.mdfAccountEmail = null;
 }
 
 function buildPlanDesc(plugin: FridayPlugin): string {

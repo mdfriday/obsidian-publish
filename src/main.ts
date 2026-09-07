@@ -55,6 +55,8 @@ interface FridaySettings {
 	mdfQuotaRetentionDays: number | null;
 	mdfQuotaMaxCustomDomains: number | null;
 	mdfQuotaFeatures: string[] | null;
+	/** Cached email from GET /v1/account (Google / Personal), display only */
+	mdfAccountEmail: string | null;
 	/** Set after first successful Cloudflare publish (Growth Card) */
 	hasPublishedOnce: boolean;
 	/**
@@ -93,6 +95,7 @@ const DEFAULT_SETTINGS: FridaySettings = {
 	mdfQuotaRetentionDays: null,
 	mdfQuotaMaxCustomDomains: null,
 	mdfQuotaFeatures: null,
+	mdfAccountEmail: null,
 	hasPublishedOnce: false,
 	pathConfigs: {},
 	/** Prefer local ControlPlane (`npm run local`) for development. */
@@ -1639,6 +1642,7 @@ export default class FridayPlugin extends Plugin {
 			this.settings.mdfQuotaRetentionDays = null;
 			this.settings.mdfQuotaMaxCustomDomains = null;
 			this.settings.mdfQuotaFeatures = null;
+			this.settings.mdfAccountEmail = null;
 			if (opts.noticeOnSwitch !== false) {
 				new Notice(
 					`Cloudflare env → ${resolved}; cleared Key (re-publish to get a new one).`,

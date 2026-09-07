@@ -423,6 +423,7 @@ export class ProjectServiceManager {
 			const account = (res.json || JSON.parse(res.text || '{}')) as {
 				kind?: string;
 				plan?: string;
+				email?: string | null;
 				storageBytes?: number;
 				contentExpiresAt?: number | null;
 				projectCount?: number;
@@ -440,6 +441,10 @@ export class ProjectServiceManager {
 
 			this.plugin.settings.mdfKeyKind = account.kind === 'user' ? 'user' : 'guest';
 			this.plugin.settings.mdfKeyPlan = account.plan;
+			this.plugin.settings.mdfAccountEmail =
+				typeof account.email === 'string' && account.email.trim()
+					? account.email.trim()
+					: null;
 			this.plugin.settings.mdfStorageBytes =
 				typeof account.storageBytes === 'number' ? account.storageBytes : 0;
 			this.plugin.settings.mdfQuotaStorageBytes =
