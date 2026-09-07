@@ -27,7 +27,7 @@
 <section class="mdf-output">
 	<div class="mdf-output-head">
 		<span class="mdf-output-title">{title}</span>
-		<div class="mdf-seg mdf-seg-mini" role="tablist">
+		<div class="mdf-seg" role="tablist">
 			<button
 				type="button"
 				class="mdf-seg-btn"
@@ -80,48 +80,42 @@
 
 <style>
 	.mdf-output {
-		margin-bottom: var(--mdf-gap, 12px);
-		border: 1px solid var(--mdf-stroke, #bdc0cb);
-		border-radius: var(--mdf-radius, 8px);
-		background: var(--mdf-card, #fff);
-		overflow: hidden;
-		box-shadow: none;
+		padding: 10px 0;
+		border-bottom: 1px solid var(--mdf-stroke, #bdc0cb);
+		background: transparent;
 	}
 	.mdf-output-head {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		min-height: 40px;
-		padding: 10px 12px;
-		box-sizing: border-box;
+		min-height: 28px;
 	}
 	.mdf-output-title {
 		font-family: var(--font-interface);
-		font-size: 14px;
+		font-size: 13px;
 		font-weight: 600;
 		color: var(--mdf-ink, #2e303b);
 	}
-	/* Flat rectangular segmented control — NOT a capsule/pill slider */
 	.mdf-seg {
 		display: inline-grid;
 		grid-template-columns: 1fr 1fr;
-		height: 28px;
+		height: 26px;
 		border: 1px solid var(--mdf-stroke, #bdc0cb);
 		border-radius: 6px;
 		overflow: hidden;
-		background: var(--mdf-card, #fff);
+		background: transparent;
 		flex-shrink: 0;
 	}
 	.mdf-seg-btn {
-		padding: 0 10px;
+		padding: 0 8px;
 		height: 100%;
 		border: none;
 		border-radius: 0;
 		background: transparent;
 		color: var(--mdf-hint, #8b8fa3);
 		font-family: var(--font-interface);
-		font-size: 12px;
+		font-size: 11px;
 		font-weight: 500;
 		cursor: pointer;
 		line-height: 1;
@@ -138,16 +132,15 @@
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		min-height: 40px;
-		padding: 12px;
-		border-top: 1px solid var(--mdf-stroke, #bdc0cb);
-		background: var(--mdf-panel, #eff1f5);
-		box-sizing: border-box;
+		min-height: 28px;
+		margin-top: 8px;
+		padding: 0;
+		background: transparent;
 	}
 	.mdf-dot {
 		flex-shrink: 0;
-		width: 8px;
-		height: 8px;
+		width: 7px;
+		height: 7px;
 		border-radius: 50%;
 		background: #34c759;
 	}
@@ -188,10 +181,10 @@
 		color: var(--mdf-danger, #e05454);
 	}
 	.mdf-output-empty {
-		padding: 12px;
-		border-top: 1px solid var(--mdf-stroke, #bdc0cb);
+		margin-top: 8px;
+		padding: 0;
 		font-size: 12px;
 		color: var(--mdf-hint, #8b8fa3);
-		background: var(--mdf-panel, #eff1f5);
+		background: transparent;
 	}
 </style>

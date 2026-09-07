@@ -5,13 +5,13 @@
 	import BrandHeader from './BrandHeader.svelte';
 	import SelectionHeader from './SelectionHeader.svelte';
 	import ModeSwitch from './ModeSwitch.svelte';
-	import ThemePicker from './ThemePicker.svelte';
 	import ProtectPanel from './ProtectPanel.svelte';
 	import PublishActions from './PublishActions.svelte';
 	import RecentOutput from './RecentOutput.svelte';
 	import DomainSection from '../DomainSection.svelte';
 	import HistorySection from '../HistorySection.svelte';
 	import AccountFooter from '../AccountFooter.svelte';
+	import { filterThemesForSelection } from '../../utils/theme';
 
 	export let plugin: FridayPlugin;
 	export let t: (key: string, params?: Record<string, unknown>) => string;
@@ -45,6 +45,7 @@
 
 	export let outputTab: 'online' | 'preview';
 	export let projectName: string;
+	export let historyRefreshKey: number = 0;
 
 	export let onSetMode: (mode: PublishMode) => void;
 	export let onSelectTheme: (slug: string) => void;
@@ -69,6 +70,8 @@
 			? t('ui.publish_site')
 			: t('ui.publish');
 	$: actionsDisabled = !hasContent || isPublishing;
+	$: filteredThemes = filterThemesForSelection(themeList, selectionKind);
+	$: showThemesInMode = showThemePicker;
 </script>
 
 <div class="mdf-publish-panel site-builder">
@@ -94,24 +97,35 @@
 				themedLabel={t('ui.mode_themed')}
 				hint={modeHint}
 				onChange={onSetMode}
-			/>
-		{:else if showFolderModeFixed}
-			<section class="mdf-fixed-mode">
-				<div class="mdf-label">{t('ui.publish_mode')}</div>
-				<div class="mdf-fixed-card">{t('ui.mode_themed_fixed')}</div>
-			</section>
-		{/if}
-
-		{#if showThemePicker}
-			<ThemePicker
-				label={t('ui.theme')}
-				themes={themeList}
-				selectedSlug={selectedThemeSlug}
-				loading={themesLoading}
+				showThemes={showThemesInMode}
+				themes={filteredThemes}
+				{selectedThemeSlug}
+				{themesLoading}
+				themeLabel={t('ui.theme')}
 				liveDemoLabel={t('ui.theme_live_demo')}
 				allThemesLabel={t('ui.theme_all')}
-				onSelect={onSelectTheme}
-				onOpenCatalog={onOpenThemesCatalog}
+				onSelectTheme={onSelectTheme}
+				onOpenThemesCatalog={onOpenThemesCatalog}
+			/>
+		{:else if showFolderModeFixed}
+			<ModeSwitch
+				mode="themed"
+				label={t('ui.publish_mode')}
+				faithfulLabel={t('ui.mode_faithful')}
+				themedLabel={t('ui.mode_themed')}
+				hint=""
+				onChange={onSetMode}
+				folderFixed
+				folderFixedLabel={t('ui.mode_themed_fixed')}
+				showThemes={true}
+				themes={filteredThemes}
+				{selectedThemeSlug}
+				{themesLoading}
+				themeLabel={t('ui.theme')}
+				liveDemoLabel={t('ui.theme_live_demo')}
+				allThemesLabel={t('ui.theme_all')}
+				onSelectTheme={onSelectTheme}
+				onOpenThemesCatalog={onOpenThemesCatalog}
 			/>
 		{/if}
 
@@ -171,7 +185,7 @@
 			onCopyPreview={onCopyPreview}
 		/>
 
-		<HistorySection {plugin} {projectName} />
+		<HistorySection {plugin} {projectName} refreshKey={historyRefreshKey} />
 	</div>
 
 	<div class="mdf-panel-footer">
@@ -191,7 +205,7 @@
 		--mdf-primary: #9375ef;
 		--mdf-danger: #e05454;
 		--mdf-radius: 8px;
-		--mdf-gap: 12px;
+		--mdf-gap: 0;
 		--mdf-pad: 16px;
 
 		height: 100%;
@@ -201,8 +215,11 @@
 		flex-direction: column;
 		box-sizing: border-box;
 		padding: var(--mdf-pad);
+		/* Clear Obsidian status bar (~16px extra below account footer) */
+		padding-bottom: calc(var(--mdf-pad) + 16px);
 		gap: 0;
 		font-family: var(--font-interface);
+		font-size: 13px;
 		color: var(--mdf-ink);
 		background: var(--mdf-panel);
 	}
@@ -221,99 +238,79 @@
 
 	.mdf-panel-footer {
 		flex-shrink: 0;
-		padding: var(--mdf-gap) 0 0;
-		border-top: none;
+		padding: 0;
+		border-top: 1px solid var(--mdf-stroke);
 		background: transparent;
-	}
-
-	.mdf-label {
-		font-size: 14px;
-		font-weight: 600;
-		margin-bottom: 8px;
-		color: var(--mdf-ink);
-	}
-
-	.mdf-fixed-mode {
-		margin-bottom: var(--mdf-gap);
-	}
-
-	.mdf-fixed-card {
-		min-height: 40px;
-		padding: 12px;
-		border-radius: var(--mdf-radius);
-		font-size: 13px;
-		color: var(--mdf-hint);
-		border: 1px solid var(--mdf-stroke);
-		background: var(--mdf-card);
-		box-sizing: border-box;
 	}
 
 	.mdf-domain-slot {
 		margin-bottom: 0;
 	}
 
-	/* Domain / History fold cards — match ProtectPanel */
-	.mdf-panel-scroll :global(.capability-section) {
-		margin-bottom: var(--mdf-gap);
-		border: 1px solid var(--mdf-stroke);
-		border-radius: var(--mdf-radius);
-		background: var(--mdf-card);
-		overflow: hidden;
+	/* Domain / History — flat setting rows (beat .site-builder capability-sections.css) */
+	.mdf-publish-panel.site-builder .mdf-panel-scroll :global(.capability-section) {
+		margin-bottom: 0;
+		border: none;
+		border-bottom: 1px solid var(--mdf-stroke);
+		border-radius: 0;
+		background: transparent;
+		overflow: visible;
 		box-shadow: none;
 	}
 
-	.mdf-panel-scroll :global(.mdf-fold-toggle),
-	.mdf-panel-scroll :global(.capability-section > .subsection-toggle) {
-		min-height: 40px;
-		padding: 12px;
-		gap: 4px;
+	.mdf-publish-panel.site-builder .mdf-panel-scroll :global(.mdf-fold-toggle),
+	.mdf-publish-panel.site-builder .mdf-panel-scroll :global(.capability-section > .subsection-toggle) {
+		min-height: 36px;
+		padding: 8px 0;
+		gap: 8px;
 		background: transparent;
 		box-shadow: none;
 	}
 
-	.mdf-panel-scroll :global(.setting-item-name) {
-		flex: 0 0 auto;
-		font-size: 14px;
-		font-weight: 600;
+	.mdf-publish-panel.site-builder .mdf-panel-scroll :global(.capability-section > .subsection-toggle:hover) {
+		background: transparent;
+	}
+
+	.mdf-publish-panel.site-builder .mdf-panel-scroll :global(.setting-item-name) {
+		flex: 1;
+		font-size: 13px;
+		font-weight: 500;
 		color: var(--mdf-ink);
 	}
 
-	.mdf-panel-scroll :global(.capability-sep) {
-		margin: 0 4px;
+	.mdf-publish-panel.site-builder .mdf-panel-scroll :global(.capability-summary) {
+		margin-left: auto !important;
+		text-align: right !important;
+		font-size: 12px;
 		color: var(--mdf-hint);
-	}
-
-	.mdf-panel-scroll :global(.capability-summary) {
-		margin-left: 0 !important;
-		text-align: left !important;
-		font-size: 13px;
-		color: var(--mdf-muted);
 		font-weight: 500;
+		max-width: none;
 	}
 
-	.mdf-panel-scroll :global(.mdf-fold-chevron) {
-		margin-left: auto;
+	.mdf-publish-panel.site-builder .mdf-panel-scroll :global(.mdf-fold-chevron) {
+		margin-left: 4px;
 		color: var(--mdf-hint);
 	}
 
-	.mdf-panel-scroll :global(.capability-body) {
-		padding: 12px;
-		border-top: 1px solid var(--mdf-stroke);
-		background: var(--mdf-card);
+	.mdf-publish-panel.site-builder .mdf-panel-scroll :global(.capability-body) {
+		padding: 0 0 10px;
+		border-top: none;
+		background: transparent;
 		gap: 8px;
 	}
 
-	.mdf-panel-scroll :global(.history-count-badge) {
+	.mdf-publish-panel.site-builder .mdf-panel-scroll :global(.history-count-badge) {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		min-width: 18px;
-		height: 18px;
-		padding: 0 5px;
-		border-radius: 999px;
-		background: var(--mdf-soft);
-		color: var(--mdf-muted);
-		font-size: 11px;
-		font-weight: 600;
+		margin-left: auto;
+		min-width: 0;
+		height: auto;
+		padding: 0;
+		border-radius: 0;
+		background: transparent;
+		color: var(--mdf-hint);
+		font-size: 12px;
+		font-weight: 500;
 	}
 </style>

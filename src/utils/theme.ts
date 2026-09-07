@@ -8,6 +8,22 @@ export const DEFAULT_THEME_SLUGS = {
 	QUARTZ: 'quartz',
 } as const;
 
+/** Sidebar theme list: notes family for single note; quartz only for folder. */
+export function filterThemesForSelection(
+	themes: CatalogEntry[],
+	kind: 'note' | 'folder',
+): CatalogEntry[] {
+	const withPack = themes.filter((t) => !!t.packUrl);
+	if (kind === 'folder') {
+		return withPack.filter((t) => {
+			const family = (t.family || '').toLowerCase();
+			const slug = (t.slug || '').toLowerCase();
+			return family === 'quartz' || slug === 'quartz' || slug.startsWith('quartz');
+		});
+	}
+	return withPack.filter((t) => (t.family || '').toLowerCase() === 'notes');
+}
+
 /**
  * Themed builds always use Foundry's default MarkdownIt renderer.
  * Obsidian-tag local render was removed (Phase 1.5); use PublishMode=faithful instead.

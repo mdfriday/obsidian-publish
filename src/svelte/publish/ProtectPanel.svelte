@@ -22,11 +22,8 @@
 
 <section class="mdf-setting-block">
 	<button type="button" class="mdf-setting-row" on:click={toggleExpand} aria-expanded={expanded}>
-		<span class="mdf-setting-title">
-			{label}
-			<span class="mdf-sep">·</span>
-			<span class="mdf-status">{statusLabel}</span>
-		</span>
+		<span class="mdf-setting-title">{label}</span>
+		<span class="mdf-status">{statusLabel}</span>
 		<svg
 			class="mdf-chevron"
 			class:is-open={expanded}
@@ -81,20 +78,16 @@
 
 <style>
 	.mdf-setting-block {
-		margin-bottom: var(--mdf-gap, 12px);
-		border: 1px solid var(--mdf-stroke, #bdc0cb);
-		border-radius: var(--mdf-radius, 8px);
-		background: var(--mdf-card, #fff);
-		overflow: hidden;
-		box-shadow: none;
+		border-bottom: 1px solid var(--mdf-stroke, #bdc0cb);
+		background: transparent;
 	}
 	.mdf-setting-row {
 		width: 100%;
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		min-height: 40px;
-		padding: 12px;
+		min-height: 36px;
+		padding: 8px 0;
 		border: none;
 		background: transparent;
 		color: var(--mdf-ink, #2e303b);
@@ -106,17 +99,14 @@
 		flex: 1;
 		min-width: 0;
 		font-family: var(--font-interface);
-		font-size: 14px;
-		font-weight: 600;
-	}
-	.mdf-sep {
-		margin: 0 4px;
-		color: var(--mdf-hint, #8b8fa3);
-		font-weight: 400;
+		font-size: 13px;
+		font-weight: 500;
 	}
 	.mdf-status {
-		color: var(--mdf-muted, #4d4f67);
+		flex-shrink: 0;
+		font-size: 12px;
 		font-weight: 500;
+		color: var(--mdf-hint, #8b8fa3);
 	}
 	.mdf-chevron {
 		flex-shrink: 0;
@@ -127,9 +117,7 @@
 		transform: rotate(90deg);
 	}
 	.mdf-setting-body {
-		padding: 12px;
-		border-top: 1px solid var(--mdf-stroke, #bdc0cb);
-		background: var(--mdf-card, #fff);
+		padding: 0 0 10px;
 	}
 	.mdf-password-row {
 		display: flex;
@@ -139,11 +127,11 @@
 	.mdf-input {
 		flex: 1;
 		min-width: 0;
-		height: 36px;
+		height: 32px;
 		padding: 0 10px;
 		border: 1px solid var(--mdf-stroke, #bdc0cb);
 		border-radius: 6px;
-		background: var(--mdf-card, #fff);
+		background: transparent;
 		color: var(--mdf-ink, #2e303b);
 		font-size: 13px;
 		box-sizing: border-box;
@@ -152,12 +140,12 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 36px;
-		height: 36px;
+		width: 32px;
+		height: 32px;
 		padding: 0;
 		border: 1px solid var(--mdf-stroke, #bdc0cb);
 		border-radius: 6px;
-		background: var(--mdf-card, #fff);
+		background: transparent;
 		color: var(--mdf-hint, #8b8fa3);
 		cursor: pointer;
 	}

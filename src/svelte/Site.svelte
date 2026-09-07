@@ -19,7 +19,7 @@
 	import type { CatalogEntry } from "../theme/types";
 	import type { ProjectState, ProgressUpdate, PublishProgressUpdate } from "../types/events";
 	import { buildThemeConfigPatch } from "../theme/theme-config";
-	import { DEFAULT_THEME_SLUGS } from "../utils/theme";
+	import { DEFAULT_THEME_SLUGS, filterThemesForSelection } from "../utils/theme";
 	import {
 		buildFaithfulToProject,
 		serveFaithfulPublicDir,
@@ -79,6 +79,7 @@
 	let publishMode: PublishMode = 'faithful';
 	let showAuthTip = false;
 	let outputTab: 'online' | 'preview' = 'online';
+	let historyRefreshKey = 0;
 	let userChoseMode = false;
 	/** Skip path hydrate once (right-click defaults publish). */
 	let skipPathHydrate = false;
@@ -367,11 +368,8 @@
 				if (state.config.markdown?.useInternalRenderer === undefined) {
 					await saveFoundryConfig('markdown.useInternalRenderer', true);
 				}
-				// Restored themed config → stay in themed mode when selection is a note
-				if (selectionKindFromContents(currentContents) === 'note') {
-					userChoseMode = true;
-					publishMode = 'themed';
-				}
+				// Do not force themed mode here — note default is faithful;
+				// pathConfigs hydrate decides mode after selection is ready.
 			} else if (state.config.module?.imports?.[0]?.path) {
 				selectedThemeDownloadUrl = state.config.module.imports[0].path;
 				userHasSelectedTheme = true;
@@ -416,6 +414,12 @@
 			}
 		}
 
+		// Path-scoped mode wins over Foundry theme leftovers (note → faithful by default).
+		if (activeVaultPath) {
+			lastHydratedPath = null;
+			await hydrateFromPathConfig(activeVaultPath);
+		}
+
 		// Notify Main.ts that initialization is complete
 		if (plugin.handleSiteEvent) {
 			await plugin.handleSiteEvent('initialized', {
@@ -458,6 +462,8 @@
 				isPublishing = false;
 				publishSuccess = true;
 				publishProgress = 100;
+				outputTab = 'online';
+				historyRefreshKey += 1;
 				if (progress.data?.publishUrl) {
 					publishUrl = buildPublishUrl(progress.data.publishUrl);
 					persistLastPublishUrl(publishUrl);
@@ -479,6 +485,8 @@
 				publishSuccess = true;
 				isBuilding = false;
 				isPreviewBuilding = false;
+				outputTab = 'online';
+				historyRefreshKey += 1;
 				
 				if (progress.data?.publishUrl) {
 					publishUrl = buildPublishUrl(progress.data.publishUrl);
@@ -624,6 +632,7 @@
 		publishUrl = buildPublishUrl(result.url || '');
 		if (publishUrl) {
 			outputTab = 'online';
+			historyRefreshKey += 1;
 		}
 		if (result.baseURL) {
 			sitePath = result.baseURL;
@@ -840,10 +849,13 @@
 			if (themeList.length === 0) {
 				await loadThemeList();
 			}
+			const filtered = filterThemesForSelection(themeList, kind);
 			const slug =
-				cfg.themeSlug ||
-				themeList.find((item) => !!item.packUrl)?.slug ||
-				DEFAULT_THEME_SLUGS.QUARTZ;
+				(cfg.themeSlug && filtered.some((t) => t.slug === cfg.themeSlug)
+					? cfg.themeSlug
+					: null) ||
+				filtered[0]?.slug ||
+				(kind === 'folder' ? DEFAULT_THEME_SLUGS.QUARTZ : DEFAULT_THEME_SLUGS.NOTE);
 			selectedThemeSlug = slug;
 			const theme = themeList.find((item) => item.slug === slug);
 			selectedThemeName = theme?.name || slug;
@@ -905,10 +917,19 @@
 			selectedThemeName = 'Obsidian (faithful)';
 			userHasSelectedTheme = false;
 		} else if (!selectedThemeSlug) {
-			selectedThemeSlug = DEFAULT_THEME_SLUGS.NOTE;
-			selectedThemeName = 'Paper';
+			const filtered = filterThemesForSelection(themeList, 'note');
+			const slug = filtered[0]?.slug || DEFAULT_THEME_SLUGS.NOTE;
+			selectedThemeSlug = slug;
+			selectedThemeName = filtered[0]?.name || slug;
 			void applyThemeBySlug(selectedThemeSlug);
 			return;
+		} else {
+			const filtered = filterThemesForSelection(themeList, 'note');
+			if (!filtered.some((t) => t.slug === selectedThemeSlug)) {
+				const slug = filtered[0]?.slug || DEFAULT_THEME_SLUGS.NOTE;
+				void applyThemeBySlug(slug);
+				return;
+			}
 		}
 		schedulePersistPathConfig();
 	}
@@ -1586,7 +1607,8 @@
 			if (themeList.length === 0) {
 				await loadThemeList();
 			}
-			const firstTheme = themeList.find((item) => !!item.packUrl);
+			const filtered = filterThemesForSelection(themeList, 'folder');
+			const firstTheme = filtered[0];
 			if (firstTheme?.packUrl) {
 				await applyThemeBySlug(firstTheme.slug);
 			} else {
@@ -2008,6 +2030,7 @@
 	{isPreviewBuilding}
 	{buildProgress}
 	{outputTab}
+	{historyRefreshKey}
 	projectName={plugin.currentProjectName || projectName}
 	onSetMode={setPublishMode}
 	onSelectTheme={applyThemeBySlug}

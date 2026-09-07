@@ -328,7 +328,6 @@
 		aria-expanded={expanded}
 	>
 		<span class="setting-item-name">{domainTitle}</span>
-		<span class="capability-sep" aria-hidden="true">·</span>
 		<span class="capability-summary">{summaryLine}</span>
 		<svg
 			class="mdf-fold-chevron"
@@ -512,21 +511,21 @@
 	}
 
 	.capability-summary {
-		margin-left: 0;
-		font-size: 12px;
-		color: var(--text-muted);
-		font-weight: 400;
+		margin-left: auto;
+		font-size: 13px;
+		color: var(--mdf-muted, #4d4f67);
+		font-weight: 500;
 		max-width: 55%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		text-align: left;
+		text-align: right;
 	}
 
 	.mdf-fold-chevron {
 		flex-shrink: 0;
-		margin-left: auto;
-		color: var(--text-faint, var(--text-muted));
+		margin-left: 8px;
+		color: var(--mdf-hint, #8b8fa3);
 		transition: transform 0.12s ease;
 	}
 

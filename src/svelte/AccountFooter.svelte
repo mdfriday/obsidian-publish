@@ -99,16 +99,16 @@
 <style>
 	.account-footer {
 		margin: 0;
-		padding: 12px;
-		border: 1px solid var(--mdf-stroke, #bdc0cb);
-		border-radius: var(--mdf-radius, 8px);
-		background: var(--mdf-card, #fff);
+		padding: 10px 0 0;
+		border: none;
+		border-radius: 0;
+		background: transparent;
 		box-shadow: none;
 	}
 
 	.af-compact {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		justify-content: space-between;
 		gap: 12px;
 	}
@@ -126,7 +126,7 @@
 	}
 
 	.af-quota-sub {
-		margin-top: 2px;
+		margin-top: 3px;
 		font-size: 12px;
 		color: var(--mdf-hint, #8b8fa3);
 		line-height: 1.35;
@@ -141,10 +141,10 @@
 
 	.af-btn {
 		padding: 0 10px;
-		height: 32px;
+		height: 28px;
 		border: 1px solid var(--mdf-stroke, #bdc0cb);
 		border-radius: 6px;
-		background: var(--mdf-card, #fff);
+		background: transparent;
 		color: var(--mdf-muted, #4d4f67);
 		font-family: var(--font-interface);
 		font-size: 12px;

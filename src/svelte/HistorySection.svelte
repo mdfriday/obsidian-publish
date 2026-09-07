@@ -5,6 +5,8 @@
 	export let plugin: FridayPlugin;
 	export let projectName: string;
 	export let onRolledBack: (() => void) | undefined = undefined;
+	/** Bump after publish success to reload release count without expanding. */
+	export let refreshKey: number = 0;
 
 	type ReleaseRow = {
 		id: string;
@@ -29,6 +31,19 @@
 	);
 	$: canRollback = hostingMode === 'custom';
 	$: summaryLine = String(published.length);
+
+	let prevProjectName = '';
+	let prevRefreshKey = -1;
+
+	$: {
+		const nameChanged = projectName !== prevProjectName;
+		const keyChanged = refreshKey !== prevRefreshKey;
+		if (projectName && (nameChanged || keyChanged)) {
+			prevProjectName = projectName;
+			prevRefreshKey = refreshKey;
+			void refresh();
+		}
+	}
 
 	async function toggle() {
 		expanded = !expanded;
@@ -128,7 +143,6 @@
 		aria-expanded={expanded}
 	>
 		<span class="setting-item-name">{plugin.i18n?.t?.('ui.history') || 'History'}</span>
-		<span class="capability-sep" aria-hidden="true">·</span>
 		<span class="history-count-badge">{summaryLine}</span>
 		<svg
 			class="mdf-fold-chevron"
@@ -260,21 +274,30 @@
 		font-size: 12px;
 	}
 
-	.capability-sep {
-		flex-shrink: 0;
-		margin: 0 2px;
-		color: var(--text-muted);
-		font-weight: 400;
-	}
-
 	.mdf-fold-chevron {
 		flex-shrink: 0;
-		margin-left: auto;
-		color: var(--text-faint, var(--text-muted));
+		margin-left: 8px;
+		color: var(--mdf-hint, #8b8fa3);
 		transition: transform 0.12s ease;
 	}
 
 	.mdf-fold-chevron.is-open {
 		transform: rotate(90deg);
+	}
+
+	:global(.history-count-badge),
+	.history-count-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		margin-left: auto;
+		min-width: 0;
+		height: auto;
+		padding: 0;
+		border-radius: 0;
+		background: transparent;
+		color: var(--mdf-hint, #8b8fa3);
+		font-size: 12px;
+		font-weight: 500;
 	}
 </style>

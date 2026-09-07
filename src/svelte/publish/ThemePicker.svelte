@@ -9,13 +9,15 @@
 	export let allThemesLabel: string;
 	export let onSelect: (slug: string) => void;
 	export let onOpenCatalog: () => void;
+	/** When true, nest inside publish-mode card (no outer card chrome). */
+	export let embedded: boolean = false;
 
 	function demoUrl(theme: CatalogEntry): string {
 		return `https://mdfriday.com/demo/${theme.slug || ''}/index.html`;
 	}
 </script>
 
-<section class="mdf-themes">
+<section class="mdf-themes" class:is-embedded={embedded}>
 	<div class="mdf-label">{label}</div>
 	{#if loading && themes.length === 0}
 		<p class="mdf-hint">…</p>
@@ -55,28 +57,34 @@
 	.mdf-themes {
 		margin-bottom: var(--mdf-gap, 12px);
 	}
+	.mdf-themes.is-embedded {
+		margin-bottom: 0;
+	}
 	.mdf-label {
-		font-size: 14px;
-		font-weight: 600;
-		margin-bottom: 8px;
-		color: var(--mdf-ink, #2e303b);
+		font-size: 12px;
+		font-weight: 500;
+		margin-bottom: 6px;
+		color: var(--mdf-hint, #8b8fa3);
 	}
 	.mdf-theme-list {
 		list-style: none;
 		margin: 0;
 		padding: 0;
 		border: 1px solid var(--mdf-stroke, #bdc0cb);
-		border-radius: var(--mdf-radius, 8px);
+		border-radius: 6px;
 		overflow: hidden;
-		background: var(--mdf-card, #fff);
+		background: transparent;
+	}
+	.mdf-themes.is-embedded .mdf-theme-list {
+		background: transparent;
 	}
 	.mdf-theme-row {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 8px;
-		min-height: 40px;
-		padding: 8px 12px;
+		min-height: 32px;
+		padding: 4px 8px;
 		border-bottom: 1px solid var(--mdf-stroke, #bdc0cb);
 	}
 	.mdf-theme-row:last-child {

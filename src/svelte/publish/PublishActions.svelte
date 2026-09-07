@@ -73,16 +73,14 @@
 
 <style>
 	.mdf-actions {
-		margin: 0 0 var(--mdf-gap, 12px);
+		padding: 10px 0;
+		border-bottom: 1px solid var(--mdf-stroke, #bdc0cb);
 	}
 	.mdf-auth-tip {
 		margin-bottom: 8px;
-		padding: 10px 12px;
-		border: 1px solid var(--mdf-stroke, #bdc0cb);
-		border-radius: var(--mdf-radius, 8px);
-		background: var(--mdf-card, #fff);
-		color: var(--mdf-hint, #8b8fa3);
+		padding: 8px 0;
 		font-size: 12px;
+		color: var(--mdf-hint, #8b8fa3);
 		line-height: 1.4;
 	}
 	.mdf-btn-row {
@@ -96,12 +94,12 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		height: 40px;
-		min-height: 40px;
-		padding: 0 12px;
-		border-radius: var(--mdf-radius, 8px);
+		height: 32px;
+		min-height: 32px;
+		padding: 0 10px;
+		border-radius: 8px;
 		font-family: var(--font-interface);
-		font-size: 14px;
+		font-size: 13px;
 		font-weight: 600;
 		cursor: pointer;
 		box-shadow: none;
@@ -115,7 +113,7 @@
 		position: absolute;
 		left: 0;
 		bottom: 0;
-		height: 3px;
+		height: 2px;
 		background: rgba(255, 255, 255, 0.9);
 		transition: width 0.15s ease;
 	}
@@ -134,9 +132,9 @@
 		cursor: not-allowed;
 	}
 	.mdf-btn-secondary {
-		border: 1px solid var(--mdf-stroke, #bdc0cb);
-		background: var(--mdf-card, #fff);
-		color: var(--mdf-muted, #4d4f67);
+		border: 1px solid var(--mdf-primary, #9375ef);
+		background: transparent;
+		color: var(--mdf-primary, #9375ef);
 	}
 	.mdf-auto-row {
 		display: flex;
