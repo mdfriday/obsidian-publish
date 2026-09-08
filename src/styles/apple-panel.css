@@ -414,7 +414,7 @@
 
 .mdf-apple-panel .panel-actions {
   display: flex;
-  padding: 14px 22px calc(18px + env(safe-area-inset-bottom, 0px));
+  padding: 14px 22px calc(35px + env(safe-area-inset-bottom, 0px));
   gap: 10px;
   align-items: center;
   justify-content: stretch;
