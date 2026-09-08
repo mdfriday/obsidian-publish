@@ -33,5 +33,5 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--mdf-panel, #eff1f5);
+  background: #f5f5f7;
 }

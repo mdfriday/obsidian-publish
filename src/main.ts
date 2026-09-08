@@ -273,6 +273,7 @@ export default class FridayPlugin extends Plugin {
 		// Import PC-only styles
 		await Promise.all([
 			import('./styles/mdf-tokens.css'),
+			import('./styles/apple-panel.css'),
 			import('./styles/capability-sections.css'),
 			import('./styles/theme-modal.css'),
 			import('./styles/publish-settings.css'),

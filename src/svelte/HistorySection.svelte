@@ -7,6 +7,8 @@
 	export let onRolledBack: (() => void) | undefined = undefined;
 	/** Bump after publish success to reload release count without expanding. */
 	export let refreshKey: number = 0;
+	/** `tab` = always expanded (Apple history tab); `fold` = collapsible section */
+	export let layout: 'fold' | 'tab' = 'fold';
 
 	type ReleaseRow = {
 		id: string;
@@ -17,7 +19,7 @@
 		totalBytes?: number;
 	};
 
-	let expanded = false;
+	let expanded = layout === 'tab';
 	let loading = false;
 	let busy = false;
 	let statusMsg = '';
@@ -50,6 +52,10 @@
 		if (expanded) {
 			await refresh();
 		}
+	}
+
+	$: if (layout === 'tab' && !expanded) {
+		expanded = true;
 	}
 
 	async function resolveAuth(): Promise<string | null> {
@@ -135,7 +141,8 @@
 	}
 </script>
 
-<div class="capability-section mdf-fold">
+<div class="capability-section mdf-fold" class:is-tab={layout === 'tab'}>
+	{#if layout !== 'tab'}
 	<button
 		type="button"
 		class="subsection-toggle mdf-fold-toggle"
@@ -158,13 +165,14 @@
 			<polyline points="9 18 15 12 9 6"></polyline>
 		</svg>
 	</button>
+	{/if}
 
-	{#if expanded}
+	{#if expanded || layout === 'tab'}
 		<div class="capability-body">
 			{#if loading}
 				<p class="field-hint">Loading…</p>
 			{:else if !remoteProjectId}
-				<p class="field-hint">Publish this site once to see release history.</p>
+				<p class="field-hint">{plugin.i18n?.t?.('ui.history_empty_hint') || 'Publish this site once to see release history.'}</p>
 			{:else}
 				{#if !canRollback}
 					<p class="field-hint">
@@ -174,7 +182,7 @@
 				{/if}
 
 				{#if published.length === 0}
-					<p class="field-hint">No published releases yet.</p>
+					<p class="field-hint">{plugin.i18n?.t?.('ui.history_empty') || 'No published releases yet.'}</p>
 				{:else}
 					<ul class="history-list">
 						{#each published as r (r.id)}
@@ -194,7 +202,7 @@
 											disabled={busy}
 											on:click={() => rollback(r)}
 										>
-											Rollback
+											{plugin.i18n?.t?.('ui.history_rollback') || 'Rollback'}
 										</button>
 									{/if}
 								</div>
@@ -204,7 +212,7 @@
 				{/if}
 
 				<button class="action-button" on:click={refresh} disabled={busy || loading}>
-					Refresh
+					{plugin.i18n?.t?.('ui.refresh') || 'Refresh'}
 				</button>
 			{/if}
 

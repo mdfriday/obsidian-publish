@@ -1,0 +1,2071 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MDFriday Publish — Obsidian Sidebar UX</title>
+  <style>
+    :root {
+      --ob-bg: #1a1a1a;
+      --ob-sidebar: #141414;
+      --ob-border: rgba(255,255,255,0.08);
+      --ob-text: #c8c8c8;
+      --ob-muted: #7a7a7a;
+      --ob-faint: #555;
+      --ob-hover: rgba(255,255,255,0.06);
+      --apple-bg: #F5F5F7;
+      --apple-section: #FBFBFD;
+      --apple-white: #FFFFFF;
+      --apple-text: #1D1D1F;
+      --apple-secondary: #86868B;
+      --apple-tertiary: #6E6E73;
+      --apple-blue: #0071E3;
+      --apple-blue-hover: #0077ED;
+      --apple-gray-fill: #E8E8ED;
+      --apple-gray-hover: #D2D2D7;
+      --apple-divider: rgba(0,0,0,0.08);
+      --apple-success: #34C759;
+      --apple-warning: #FF9F0A;
+      --apple-danger: #FF3B30;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+      --radius-pill: 980px;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+              "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      --font-mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+      --panel-w: 340px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { height: 100%; }
+    body {
+      font-family: var(--font);
+      background: #0c0c0c;
+      color: var(--ob-text);
+      height: 100%;
+      height: 100vh;
+      max-height: 100vh;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      flex-direction: column;
+    }
+    .proto-bar {
+      position: relative; flex-shrink: 0; z-index: 1000;
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 8px 16px; background: rgba(12,12,12,0.94);
+      backdrop-filter: blur(16px); border-bottom: 1px solid var(--ob-border); font-size: 12px;
+    }
+    .proto-bar .label {
+      color: var(--ob-faint); font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.05em; font-size: 10px; margin-right: 2px;
+    }
+    .proto-bar .group { display: flex; align-items: center; gap: 4px; }
+    .proto-btn {
+      appearance: none; border: 1px solid var(--ob-border); background: rgba(255,255,255,0.04);
+      color: var(--ob-muted); padding: 4px 11px; border-radius: var(--radius-pill);
+      font-size: 12px; font-family: inherit; cursor: pointer; transition: all 0.15s ease;
+    }
+    .proto-btn:hover { background: var(--ob-hover); color: var(--ob-text); }
+    .proto-btn.active {
+      background: rgba(0,113,227,0.18); border-color: rgba(0,113,227,0.4); color: #6BB3FF;
+    }
+    .proto-sep { width: 1px; height: 16px; background: var(--ob-border); margin: 0 6px; }
+    .proto-hint { margin-left: auto; color: var(--ob-faint); font-size: 11px; }
+    .obsidian-app {
+      display: grid;
+      grid-template-columns: 220px 1fr var(--panel-w);
+      grid-template-rows: minmax(0, 1fr);
+      flex: 1 1 0%;
+      min-height: 0;
+      background: var(--ob-bg);
+      overflow: hidden;
+    }
+    .obsidian-app > * {
+      min-height: 0;
+      min-width: 0;
+      height: auto;
+      max-height: 100%;
+      overflow: hidden;
+    }
+    .left-sidebar {
+      background: var(--ob-sidebar); border-right: 1px solid var(--ob-border);
+      display: flex; flex-direction: column; padding: 12px 8px; user-select: none;
+      opacity: 0.85; overflow-y: auto;
+    }
+    .vault-header {
+      display: flex; align-items: center; gap: 8px; padding: 6px 8px 14px;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+      text-transform: uppercase; color: var(--ob-muted);
+    }
+    .vault-icon {
+      width: 14px; height: 14px; border-radius: 3px;
+      background: linear-gradient(135deg, #0071E3, #5E5CE6);
+    }
+    .tree-item {
+      display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 6px;
+      font-size: 13px; color: var(--ob-muted); cursor: pointer; border: none;
+      background: transparent; width: 100%; text-align: left; font-family: inherit;
+    }
+    .tree-item:hover { background: var(--ob-hover); color: var(--ob-text); }
+    .tree-item.active { background: rgba(0,113,227,0.15); color: #8ec7ff; }
+    .tree-item.folder { color: var(--ob-text); font-weight: 500; }
+    .tree-item .ico { width: 14px; opacity: 0.65; flex-shrink: 0; }
+    .tree-item.indent-1 { padding-left: 22px; }
+    .tree-badge {
+      margin-left: auto; font-size: 9px; padding: 1px 5px; border-radius: 4px;
+      background: rgba(52,199,89,0.2); color: #6ee08a;
+    }
+    .editor-pane {
+      display: flex; flex-direction: column; background: var(--ob-bg);
+      position: relative; min-width: 0; opacity: 0.9;
+    }
+    .tab-bar {
+      display: flex; align-items: center; padding: 6px 10px 0;
+      border-bottom: 1px solid var(--ob-border); background: var(--ob-sidebar); min-height: 36px;
+    }
+    .editor-tab {
+      display: flex; align-items: center; gap: 6px; padding: 7px 14px; font-size: 13px;
+      border-radius: 6px 6px 0 0; background: var(--ob-bg);
+      border: 1px solid var(--ob-border); border-bottom: none; margin-bottom: -1px; color: var(--ob-text);
+    }
+    .editor-body { flex: 1; padding: 40px 56px; overflow-y: auto; line-height: 1.7; }
+    .editor-body h1 { font-size: 28px; font-weight: 600; color: #e8e8e8; margin-bottom: 8px; letter-spacing: -0.02em; }
+    .editor-meta { font-size: 12px; color: var(--ob-faint); margin-bottom: 28px; }
+    .editor-body p { font-size: 15px; color: var(--ob-muted); margin-bottom: 14px; max-width: 640px; }
+    .editor-body .md-h2 { font-size: 18px; color: #d0d0d0; margin: 28px 0 10px; font-weight: 600; }
+    .editor-body code {
+      font-family: var(--font-mono); font-size: 13px; background: rgba(255,255,255,0.06);
+      padding: 2px 6px; border-radius: 4px; color: #a8d4ff;
+    }
+    .editor-body blockquote {
+      border-left: 3px solid rgba(0,113,227,0.45); padding-left: 14px;
+      color: var(--ob-muted); margin: 16px 0; font-style: italic;
+    }
+    .context-menu {
+      position: absolute; z-index: 200; min-width: 200px; background: #2a2a2a;
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 6px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.55); display: none; animation: menuIn 0.18s var(--ease);
+    }
+    .context-menu.show { display: block; }
+    @keyframes menuIn {
+      from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+      to { opacity: 1; transform: none; }
+    }
+    .ctx-item {
+      display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 6px;
+      font-size: 13px; color: var(--ob-text); cursor: pointer; border: none; background: transparent;
+      width: 100%; text-align: left; font-family: inherit;
+    }
+    .ctx-item:hover { background: rgba(255,255,255,0.08); }
+    .ctx-item.accent { color: #6BB3FF; font-weight: 500; }
+    .ctx-sep { height: 1px; background: rgba(255,255,255,0.08); margin: 4px 6px; }
+
+    .publish-panel {
+      background: var(--apple-bg); color: var(--apple-text);
+      border-left: 1px solid rgba(0,0,0,0.06); box-shadow: -8px 0 32px rgba(0,0,0,0.25);
+      display: flex; flex-direction: column;
+      height: 100%; max-height: 100%; min-height: 0;
+      position: relative; overflow: hidden;
+      transition: box-shadow 0.4s var(--ease);
+    }
+    .publish-panel.pulse {
+      box-shadow: -8px 0 32px rgba(0,0,0,0.25), inset 0 0 0 2px rgba(0,113,227,0.35);
+    }
+    .panel-header { padding: 16px 22px 0; background: var(--apple-section); flex-shrink: 0; position: relative; z-index: 2; }
+    .panel-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 10px; }
+    .mdf-brand-header { display: flex; align-items: center; min-width: 0; }
+    .mdf-brand-link {
+      display: inline-flex; align-items: center; gap: 8px; text-decoration: none; color: inherit;
+      min-width: 0;
+    }
+    .mdf-brand-link:hover .mdf-brand-title { color: var(--apple-blue); }
+    .mdf-logo { width: 18px; height: 18px; flex-shrink: 0; display: block; }
+    .mdf-brand-title {
+      font-size: 17px; font-weight: 600; letter-spacing: -0.02em; color: var(--apple-text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .plan-pill {
+      appearance: none; border: none; background: var(--apple-gray-fill); color: var(--apple-text);
+      font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: var(--radius-pill);
+      cursor: pointer; font-family: inherit; transition: background 0.15s;
+    }
+    .plan-pill:hover { background: var(--apple-gray-hover); }
+    .plan-pill.guest { background: #FFF3E0; color: #B25E00; }
+    .plan-pill.free { background: #E8F1FF; color: #0058B0; }
+    .plan-pill.personal { background: #E8F8ED; color: #1B7A3A; }
+    .panel-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--apple-divider); }
+    .panel-tab {
+      flex: 1; appearance: none; border: none; background: transparent; padding: 10px 4px 12px;
+      font-size: 13px; font-weight: 500; color: var(--apple-secondary); cursor: pointer;
+      font-family: inherit; position: relative; transition: color 0.15s;
+    }
+    .panel-tab:hover { color: var(--apple-text); }
+    .panel-tab.active { color: var(--apple-text); font-weight: 600; }
+    .panel-tab.active::after {
+      content: ''; position: absolute; left: 22%; right: 22%; bottom: 0; height: 2px;
+      background: var(--apple-blue); border-radius: 2px 2px 0 0;
+    }
+    .plan-pill.open { box-shadow: 0 0 0 2px rgba(0,113,227,0.25); }
+    .plan-popover {
+      position: absolute; top: 52px; right: 14px; width: 312px; max-height: min(78vh, 640px);
+      overflow-y: auto; z-index: 40;
+      background: var(--apple-section); border: 1px solid var(--apple-divider);
+      border-radius: var(--radius-lg); box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+      padding: 12px; display: none; animation: popIn 0.2s var(--ease);
+      scrollbar-width: thin;
+    }
+    .plan-popover.show { display: block; }
+    @keyframes popIn {
+      from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+      to { opacity: 1; transform: none; }
+    }
+    .plan-popover .pp-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; color: var(--apple-text); }
+    .plan-popover .pp-note {
+      font-size: 11px; color: var(--apple-secondary); line-height: 1.45; margin-bottom: 10px;
+    }
+    .pp-tier {
+      border: 1px solid var(--apple-divider); border-radius: var(--radius-md);
+      padding: 12px 12px 10px; margin-bottom: 8px;
+      background: var(--apple-white); width: 100%; text-align: left; font-family: inherit;
+      display: block; box-sizing: border-box;
+    }
+    .pp-tier.current { border-color: var(--apple-blue); box-shadow: 0 0 0 1px var(--apple-blue); background: #F7FBFF; }
+    .pp-tier .pp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .pp-tier .pp-name { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; color: var(--apple-text); }
+    .pp-tier .pp-tag {
+      font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: var(--radius-pill);
+      background: var(--apple-gray-fill); color: var(--apple-secondary); flex-shrink: 0;
+    }
+    .pp-tier.current .pp-tag { background: rgba(0,113,227,0.12); color: var(--apple-blue); }
+    .pp-tier .pp-best { font-size: 11px; color: var(--apple-secondary); margin: 4px 0 2px; line-height: 1.35; }
+    .pp-tier .pp-price { font-size: 12px; font-weight: 600; color: var(--apple-text); margin-bottom: 8px; }
+    .pp-tier .pp-price .muted { font-weight: 500; color: var(--apple-secondary); }
+    .pp-tier ul.pp-benefits {
+      list-style: none; margin: 0 0 10px; padding: 0;
+      font-size: 11px; color: var(--apple-tertiary); line-height: 1.55;
+    }
+    .pp-tier ul.pp-benefits li { padding-left: 14px; position: relative; margin-bottom: 3px; }
+    .pp-tier ul.pp-benefits li::before {
+      content: '\2713'; position: absolute; left: 0; color: var(--apple-success); font-weight: 600; font-size: 10px;
+    }
+    .pp-tier ul.pp-benefits li.note {
+      color: var(--apple-secondary); font-size: 10.5px; margin-top: 4px;
+    }
+    .pp-tier ul.pp-benefits li.note::before { content: ''; }
+    .pp-cta {
+      appearance: none; border: none; font-family: inherit; font-size: 12px; font-weight: 600;
+      padding: 7px 12px; border-radius: var(--radius-pill); cursor: pointer;
+      background: var(--apple-blue); color: #fff; width: 100%; text-align: center;
+      text-decoration: none; display: block; box-sizing: border-box;
+    }
+    .pp-cta:hover { background: var(--apple-blue-hover); }
+    .pp-cta.secondary { background: var(--apple-gray-fill); color: var(--apple-text); }
+    .pp-cta.secondary:hover { background: var(--apple-gray-hover); }
+    .pp-cta.current-cta { background: transparent; color: var(--apple-secondary); border: 1px solid var(--apple-divider); cursor: default; }
+    .pp-footer {
+      font-size: 11px; color: var(--apple-secondary); line-height: 1.45; margin-top: 2px;
+      padding-top: 10px; border-top: 1px solid var(--apple-divider);
+    }
+    .pp-footer strong { color: var(--apple-text); font-weight: 600; }
+    .panel-actions {
+      display: flex; padding: 14px 22px calc(18px + env(safe-area-inset-bottom, 0px)); gap: 10px;
+      align-items: center; justify-content: stretch;
+      background: var(--apple-section); border-top: 1px solid var(--apple-divider);
+      flex: 0 0 auto; width: 100%; box-sizing: border-box;
+      position: relative; z-index: 5;
+      box-shadow: 0 -8px 24px rgba(0,0,0,0.04);
+    }
+    .panel-actions.is-hidden { display: none !important; }
+    .panel-actions .btn {
+      min-height: 44px; padding: 12px 18px; font-size: 15px; font-weight: 500;
+      line-height: 1.2; white-space: nowrap; border-radius: var(--radius-pill);
+    }
+    .panel-actions .btn-secondary { flex: 1; min-width: 0; }
+    .panel-actions .btn-primary { flex: 1.6; min-width: 0; }
+    .history-locked {
+      text-align: center; padding: 36px 16px; color: var(--apple-secondary);
+      background: var(--apple-white); border: 1px dashed var(--apple-divider);
+      border-radius: var(--radius-md); margin-top: 4px;
+    }
+    .history-locked .ico { font-size: 26px; margin-bottom: 10px; opacity: 0.55; }
+    .history-locked .hl-title { font-size: 14px; font-weight: 600; color: var(--apple-text); margin-bottom: 6px; }
+    .history-locked .hl-desc { font-size: 12px; line-height: 1.5; margin-bottom: 14px; }
+    .btn-lock {
+      appearance: none; border: 1px solid var(--apple-divider); background: var(--apple-gray-fill);
+      color: var(--apple-secondary); font-size: 12px; padding: 6px 12px; border-radius: var(--radius-pill);
+      font-family: inherit; cursor: pointer; font-weight: 500;
+    }
+    .btn-lock:hover { background: var(--apple-gray-hover); }
+    .btn-danger-soft {
+      background: transparent; color: var(--apple-danger); border: 1px solid rgba(255,59,48,0.25);
+      font-size: 13px; padding: 8px 14px; border-radius: var(--radius-pill); width: 100%;
+      font-family: inherit; cursor: pointer; font-weight: 500; margin-top: 8px;
+    }
+    .btn-danger-soft:hover { background: rgba(255,59,48,0.06); }
+    .btn-danger { background: var(--apple-danger); color: #fff; }
+    .btn-danger:hover { background: #E0352B; }
+    .project-strip.revoked {
+      background: linear-gradient(135deg, #FFF8EE 0%, #FFFCF7 100%);
+      border-color: rgba(255,159,10,0.3);
+    }
+    .status-dot.revoked { background: var(--apple-warning); }
+    .project-strip .url-line.disabled {
+      color: var(--apple-secondary); text-decoration: line-through; cursor: default; opacity: 0.7;
+    }
+    .history-item .hi-badge.revoked { background: #FFF3E0; color: #B25E00; }
+    .history-item .hi-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tree-badge.revoked { background: rgba(255,159,10,0.2); color: #ffc266; }
+    .verify-icon {
+      width: 48px; height: 48px; border-radius: 50%; background: rgba(0,113,227,0.12);
+      color: var(--apple-blue); display: flex; align-items: center; justify-content: center;
+      font-size: 22px; margin-bottom: 14px;
+    }
+    .verify-steps {
+      width: 100%; text-align: left; background: var(--apple-white);
+      border: 1px solid var(--apple-divider); border-radius: var(--radius-md);
+      padding: 12px 14px; margin: 16px 0 12px; font-size: 12px; color: var(--apple-tertiary); line-height: 1.55;
+    }
+    .verify-steps ol { margin-left: 18px; }
+    .verify-steps li { margin-bottom: 4px; }
+    .panel-scroll {
+      /* flex-basis:0 is required so this region shrinks and scrolls inside the panel */
+      flex: 1 1 0%;
+      min-height: 0;
+      height: 0; /* reinforce shrink in stubborn browsers */
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 16px 22px 24px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(0,0,0,0.25) transparent;
+    }
+    .panel-scroll::-webkit-scrollbar { width: 8px; }
+    .panel-scroll::-webkit-scrollbar-thumb {
+      background: rgba(0,0,0,0.22); border-radius: 8px;
+    }
+    .panel-footer {
+      flex-shrink: 0; padding: 14px 22px 18px; background: var(--apple-section);
+      border-top: 1px solid var(--apple-divider); display: none; gap: 10px;
+    }
+    .panel-footer.hidden { display: none; }
+    .btn {
+      appearance: none; border: none; font-family: inherit; font-size: 14px; font-weight: 500;
+      padding: 11px 18px; border-radius: var(--radius-pill); cursor: pointer;
+      transition: background 0.15s, transform 0.1s; text-align: center;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: var(--apple-blue); color: #fff; }
+    .btn-primary:hover { background: var(--apple-blue-hover); }
+    .btn-secondary { background: var(--apple-gray-fill); color: var(--apple-text); }
+    .btn-secondary:hover { background: var(--apple-gray-hover); }
+    .confirm-actions .btn-primary, .confirm-actions .btn-secondary,
+    .success-actions .btn-primary, .success-actions .btn-secondary { flex: 1; }
+    .btn-full { width: 100%; flex: none; }
+    .btn-sm { font-size: 12px; padding: 6px 12px; }
+    .btn-ghost { background: transparent; color: var(--apple-blue); padding: 6px 0; font-size: 13px; font-weight: 500; }
+    .btn-ghost:hover { text-decoration: underline; }
+    .btn-danger-ghost { background: transparent; color: var(--apple-danger); font-size: 12px; padding: 4px 8px; }
+    .card {
+      background: var(--apple-white); border-radius: var(--radius-md); border: 1px solid var(--apple-divider);
+      padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+    .section-label {
+      font-size: 11px; font-weight: 600; color: var(--apple-secondary);
+      text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;
+    }
+    .helper { font-size: 12px; color: var(--apple-secondary); line-height: 1.45; margin-top: 6px; }
+    .helper.warn { color: #B25E00; }
+    .helper.lock { color: var(--apple-secondary); }
+    .project-strip {
+      background: linear-gradient(135deg, #F0F7FF 0%, #F8FBFF 100%);
+      border: 1px solid rgba(0,113,227,0.15); border-radius: var(--radius-md);
+      padding: 12px 14px; margin-bottom: 14px;
+    }
+    .project-strip .status-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--apple-success); flex-shrink: 0; }
+    .status-dot.unpublished { background: var(--apple-secondary); }
+    .project-strip .status-text { font-size: 12px; font-weight: 600; color: var(--apple-text); }
+    .project-strip .url-line {
+      font-size: 12px; color: var(--apple-blue); font-family: var(--font-mono);
+      word-break: break-all; margin-bottom: 4px; cursor: pointer;
+    }
+    .project-strip .meta-line { font-size: 11px; color: var(--apple-secondary); }
+    .remember-badge {
+      display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-size: 11px;
+      color: #1B7A3A; background: rgba(52,199,89,0.12); padding: 3px 8px;
+      border-radius: var(--radius-pill); font-weight: 500;
+    }
+    .target-card { display: flex; align-items: flex-start; gap: 10px; }
+    .target-icon {
+      width: 36px; height: 36px; border-radius: 9px; background: var(--apple-gray-fill);
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 16px;
+    }
+    .target-info { flex: 1; min-width: 0; }
+    .target-name {
+      font-size: 14px; font-weight: 600; color: var(--apple-text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .target-path { font-size: 11px; color: var(--apple-secondary); margin-top: 2px; font-family: var(--font-mono); }
+    .sel-switch {
+      display: flex; background: var(--apple-gray-fill); border-radius: var(--radius-pill);
+      padding: 3px; margin-top: 12px;
+    }
+    .sel-switch button {
+      flex: 1; appearance: none; border: none; background: transparent; padding: 6px 8px;
+      border-radius: var(--radius-pill); font-size: 12px; font-weight: 500;
+      color: var(--apple-secondary); cursor: pointer; font-family: inherit; transition: all 0.18s var(--ease);
+    }
+    .sel-switch button.active {
+      background: var(--apple-white); color: var(--apple-text);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08); font-weight: 600;
+    }
+    .mode-seg { display: flex; flex-direction: column; gap: 6px; }
+    .mode-option {
+      appearance: none; border: 1.5px solid var(--apple-divider); background: var(--apple-white);
+      border-radius: var(--radius-md); padding: 12px 14px; text-align: left; cursor: pointer;
+      font-family: inherit; transition: all 0.15s; width: 100%; position: relative;
+    }
+    .mode-option:hover:not(:disabled) { border-color: rgba(0,113,227,0.35); }
+    .mode-option.active {
+      border-color: var(--apple-blue); background: #F0F7FF; box-shadow: 0 0 0 1px var(--apple-blue);
+    }
+    .mode-option:disabled { opacity: 0.55; cursor: not-allowed; background: #FAFAFA; }
+    .mode-option .mode-title { font-size: 13px; font-weight: 600; color: var(--apple-text); display: flex; align-items: center; gap: 6px; }
+    .mode-option .mode-desc { font-size: 11px; color: var(--apple-secondary); margin-top: 3px; line-height: 1.4; }
+    .mode-option .radio {
+      width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--apple-gray-hover);
+      margin-left: auto; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    }
+    .mode-option.active .radio { border-color: var(--apple-blue); background: var(--apple-blue); }
+    .mode-option.active .radio::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+    .mode-row { display: flex; align-items: flex-start; gap: 8px; }
+    .disabled-tag {
+      font-size: 10px; font-weight: 600; color: var(--apple-secondary);
+      background: var(--apple-gray-fill); padding: 2px 6px; border-radius: 4px;
+    }
+
+    .theme-list {
+      /* Let the parent .panel-scroll be the only vertical scroller */
+      max-height: none; overflow: visible; border: 1px solid var(--apple-divider);
+      border-radius: var(--radius-md); background: var(--apple-white); margin-top: 4px;
+    }
+    .theme-row {
+      display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+      border-bottom: 1px solid var(--apple-divider); cursor: pointer; transition: background 0.12s;
+      border: none; background: transparent; width: 100%; text-align: left; font-family: inherit;
+    }
+    .theme-row:last-child { border-bottom: none; }
+    .theme-row:hover { background: #F8F8FA; }
+    .theme-row.selected { background: #F0F7FF; }
+    .theme-meta { flex: 1; min-width: 0; }
+    .theme-name { font-size: 13px; font-weight: 500; color: var(--apple-text); }
+    .theme-demo {
+      font-size: 11px; color: var(--apple-blue); font-weight: 500; white-space: nowrap;
+      padding: 2px 0; background: none; border: none; cursor: pointer; font-family: inherit;
+      text-decoration: none;
+    }
+    .theme-demo:hover { text-decoration: underline; }
+    .theme-check {
+      width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--apple-gray-hover);
+      flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 10px; color: transparent;
+    }
+    .theme-row.selected .theme-check {
+      background: var(--apple-blue); border-color: var(--apple-blue); color: #fff;
+    }
+    .advanced-toggle {
+      display: flex; align-items: center; justify-content: space-between; width: 100%;
+      appearance: none; border: none; background: transparent; padding: 10px 0 4px;
+      cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; color: var(--apple-text);
+    }
+    .advanced-toggle .chev { transition: transform 0.2s var(--ease); color: var(--apple-secondary); font-size: 11px; }
+    .advanced-toggle.open .chev { transform: rotate(180deg); }
+    .advanced-body { display: none; padding-top: 8px; }
+    .advanced-body.open { display: block; }
+    .field-label {
+      font-size: 12px; font-weight: 500; color: var(--apple-text); margin-bottom: 6px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .field-input {
+      width: 100%; appearance: none; border: 1px solid var(--apple-divider); background: var(--apple-white);
+      border-radius: var(--radius-sm); padding: 9px 12px; font-size: 13px; font-family: inherit;
+      color: var(--apple-text); outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .field-input:focus { border-color: var(--apple-blue); box-shadow: 0 0 0 3px rgba(0,113,227,0.15); }
+    .field-input:disabled { background: #FAFAFA; color: var(--apple-secondary); cursor: not-allowed; }
+    .field-input::placeholder { color: #AEAEB2; }
+    .field-group { margin-bottom: 14px; }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .toggle {
+      width: 42px; height: 26px; border-radius: 13px; background: var(--apple-gray-fill);
+      border: none; cursor: pointer; position: relative; transition: background 0.2s;
+      flex-shrink: 0; padding: 0;
+    }
+    .toggle.on { background: var(--apple-blue); }
+    .toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+    .toggle::after {
+      content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+      border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      transition: transform 0.2s var(--ease);
+    }
+    .toggle.on::after { transform: translateX(16px); }
+    .domain-status {
+      display: inline-flex; align-items: center; gap: 5px; font-size: 11px; margin-top: 0;
+      padding: 3px 8px; border-radius: var(--radius-pill); background: var(--apple-gray-fill);
+      color: var(--apple-secondary); font-weight: 500;
+    }
+    .domain-status.bound { background: rgba(52,199,89,0.12); color: #1B7A3A; }
+    .upgrade-banner {
+      background: #FFF8EE; border: 1px solid rgba(255,159,10,0.25); border-radius: var(--radius-md);
+      padding: 10px 12px; margin-bottom: 12px; font-size: 12px; color: #8A5A00; line-height: 1.45;
+    }
+    .upgrade-banner button.link {
+      color: var(--apple-blue); font-weight: 600; background: none; border: none;
+      cursor: pointer; font-family: inherit; font-size: inherit; padding: 0;
+    }
+    .history-empty { text-align: center; padding: 40px 16px; color: var(--apple-secondary); }
+    .history-empty .ico { font-size: 28px; margin-bottom: 10px; opacity: 0.5; }
+    .history-item {
+      background: var(--apple-white); border: 1px solid var(--apple-divider);
+      border-radius: var(--radius-md); padding: 12px; margin-bottom: 8px;
+    }
+    .history-item .hi-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+    .history-item .hi-time { font-size: 13px; font-weight: 600; color: var(--apple-text); }
+    .history-item .hi-badge {
+      font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: var(--radius-pill);
+      background: rgba(52,199,89,0.12); color: #1B7A3A;
+    }
+    .history-item .hi-badge.rolled { background: #E8F1FF; color: #0058B0; }
+    .history-item .hi-meta { font-size: 11px; color: var(--apple-secondary); margin-bottom: 8px; line-height: 1.4; }
+    .plan-card {
+      background: var(--apple-white); border: 1px solid var(--apple-divider);
+      border-radius: var(--radius-md); padding: 16px; margin-bottom: 12px;
+    }
+    .plan-card.current { border-color: rgba(0,113,227,0.35); box-shadow: 0 0 0 1px rgba(0,113,227,0.15); }
+    .plan-card .pc-name { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
+    .plan-card .pc-price { font-size: 12px; color: var(--apple-secondary); margin: 2px 0 10px; }
+    .plan-card ul { list-style: none; font-size: 12px; color: var(--apple-tertiary); line-height: 1.7; }
+    .plan-card ul li::before { content: '\2713 '; color: var(--apple-success); font-weight: 600; }
+    .plan-card ul li.lock::before { content: '\2013 '; color: var(--apple-secondary); }
+    .quota-bar { height: 4px; background: var(--apple-gray-fill); border-radius: 2px; margin: 10px 0 4px; overflow: hidden; }
+    .quota-fill { height: 100%; background: var(--apple-blue); border-radius: 2px; transition: width 0.3s; }
+    .state-view {
+      display: none; flex-direction: column; align-items: center; text-align: center; padding: 36px 8px 20px;
+    }
+    .state-view.show { display: flex; }
+    .spinner {
+      width: 36px; height: 36px; border: 3px solid var(--apple-gray-fill);
+      border-top-color: var(--apple-blue); border-radius: 50%;
+      animation: spin 0.8s linear infinite; margin-bottom: 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .progress-track {
+      width: 100%; height: 4px; background: var(--apple-gray-fill); border-radius: 2px;
+      margin-top: 16px; overflow: hidden;
+    }
+    .progress-fill { height: 100%; background: var(--apple-blue); border-radius: 2px; width: 0%; transition: width 0.4s ease; }
+    .state-title { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 6px; }
+    .state-desc { font-size: 13px; color: var(--apple-secondary); line-height: 1.5; max-width: 260px; }
+    .success-check {
+      width: 48px; height: 48px; border-radius: 50%; background: rgba(52,199,89,0.15);
+      color: var(--apple-success); display: flex; align-items: center; justify-content: center;
+      font-size: 24px; margin-bottom: 14px;
+    }
+    .success-url-box {
+      width: 100%; background: var(--apple-white); border: 1px solid var(--apple-divider);
+      border-radius: var(--radius-md); padding: 12px; margin: 16px 0 12px; text-align: left;
+    }
+    .success-url-box .url {
+      font-family: var(--font-mono); font-size: 12px; color: var(--apple-blue);
+      word-break: break-all; margin-bottom: 10px;
+    }
+    .success-actions { display: flex; gap: 8px; width: 100%; }
+
+    .result-badge {
+      display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+      padding: 3px 10px; border-radius: var(--radius-pill); margin-bottom: 12px;
+      letter-spacing: 0.02em;
+    }
+    .result-badge.publish { background: rgba(52,199,89,0.15); color: #1B7A3A; }
+    .result-badge.preview { background: #E8EEF5; color: #3A4A5C; }
+    .result-check.preview {
+      background: rgba(0,113,227,0.12); color: var(--apple-blue);
+    }
+    .preview-live-row {
+      display: flex; align-items: flex-start; gap: 8px; margin-top: 10px;
+      padding-top: 10px; border-top: 1px solid rgba(0,113,227,0.12);
+    }
+    .preview-live-row .pl-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: var(--apple-blue);
+      margin-top: 4px; flex-shrink: 0; box-shadow: 0 0 0 3px rgba(0,113,227,0.15);
+      animation: plPulse 1.6s ease-in-out infinite;
+    }
+    @keyframes plPulse {
+      0%, 100% { box-shadow: 0 0 0 3px rgba(0,113,227,0.12); }
+      50% { box-shadow: 0 0 0 5px rgba(0,113,227,0.08); }
+    }
+    .preview-live-row .pl-body { flex: 1; min-width: 0; }
+    .preview-live-row .pl-title { font-size: 12px; font-weight: 600; color: var(--apple-text); }
+    .preview-live-row .pl-url {
+      font-size: 11px; color: var(--apple-blue); font-family: var(--font-mono);
+      word-break: break-all; margin-top: 2px;
+    }
+    .preview-live-row .pl-stop {
+      appearance: none; border: none; background: var(--apple-gray-fill); color: var(--apple-text);
+      font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: var(--radius-pill);
+      cursor: pointer; font-family: inherit; flex-shrink: 0; align-self: center;
+    }
+    .preview-live-row .pl-stop:hover { background: var(--apple-gray-hover); }
+    .preview-stopped-row {
+      margin-top: 8px; font-size: 11px; color: var(--apple-secondary);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .preview-stopped-row .ps-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--apple-secondary); opacity: 0.55;
+    }
+    .result-helper {
+      font-size: 11px; color: var(--apple-secondary); line-height: 1.45;
+      max-width: 260px; margin: 4px 0 10px;
+    }
+    .result-secondary-wrap { width: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+
+    .toast {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: rgba(29,29,31,0.92); color: #fff; padding: 10px 18px; border-radius: var(--radius-pill);
+      font-size: 13px; opacity: 0; pointer-events: none; transition: all 0.25s var(--ease);
+      z-index: 2000; backdrop-filter: blur(8px);
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .confirm-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1500;
+      display: none; align-items: center; justify-content: center;
+    }
+    .confirm-overlay.show { display: flex; }
+    .confirm-box {
+      background: var(--apple-white); border-radius: var(--radius-lg); padding: 24px;
+      width: 320px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); color: var(--apple-text);
+    }
+    .confirm-box h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.02em; }
+    .confirm-box p { font-size: 13px; color: var(--apple-secondary); line-height: 1.5; margin-bottom: 18px; }
+    .confirm-actions { display: flex; gap: 8px; }
+    .confirm-actions .btn { flex: 1; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <div class="proto-bar">
+    <span class="label">Plan</span>
+    <div class="group" id="planBtns">
+      <button class="proto-btn active" data-plan="guest">Guest</button>
+      <button class="proto-btn" data-plan="free">Free</button>
+      <button class="proto-btn" data-plan="personal">Personal</button>
+    </div>
+    <div class="proto-sep"></div>
+    <span class="label">State</span>
+    <div class="group" id="stateBtns">
+      <button class="proto-btn active" data-state="idle">Idle</button>
+      <button class="proto-btn" data-state="verify">Verify</button>
+      <button class="proto-btn" data-state="building" data-kind="publish">Publishing</button>
+      <button class="proto-btn" data-state="result" data-kind="publish">Success</button>
+      <button class="proto-btn" data-state="softgate">Soft-gate</button>
+      <button class="proto-btn" data-state="building" data-kind="preview">Previewing</button>
+      <button class="proto-btn" data-state="result" data-kind="preview">Preview result</button>
+    </div>
+    <div class="proto-sep"></div>
+    <span class="label">Guest 验证</span>
+    <div class="group">
+      <button class="proto-btn" id="btnToggleVerified" title="firstPublishVerified">未验证</button>
+    </div>
+    <div class="proto-sep"></div>
+    <div class="group">
+      <button class="proto-btn" id="btnShowMenu">Show context menu</button>
+      <button class="proto-btn" id="btnOpenPanel">Open publish panel</button>
+      <button class="proto-btn" id="btnResetMemory">Reset memory</button>
+    </div>
+    <span class="proto-hint">右侧边栏 · 底部预览/发布 · 本地预览≠历史 · 计划卡片 · Turnstile 仅发布</span>
+  </div>
+
+  <div class="obsidian-app">
+    <aside class="left-sidebar">
+      <div class="vault-header"><div class="vault-icon"></div> My Vault</div>
+      <button class="tree-item folder" data-sel="folder" data-path="Knowledge Base" data-name="Knowledge Base">
+        <svg class="ico" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 2.5A1.5 1.5 0 013 1h3.5a.5.5 0 01.4.2L8 2.5h5A1.5 1.5 0 0114.5 4v8.5a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 12.5v-10z"/></svg>
+        Knowledge Base
+        <span class="tree-badge" id="badgeFolder" style="display:none">已发</span>
+      </button>
+      <button class="tree-item indent-1 active" data-sel="note" data-path="Knowledge Base/设计思考.md" data-name="设计思考">
+        <svg class="ico" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1.5A1.5 1.5 0 014.5 0h5.086a1.5 1.5 0 011.06.44l2.914 2.914a1.5 1.5 0 01.44 1.06V13.5A1.5 1.5 0 0112.5 15h-8A1.5 1.5 0 013 13.5v-12z"/></svg>
+        设计思考.md
+        <span class="tree-badge" id="badgeNote">已发</span>
+      </button>
+      <button class="tree-item indent-1" data-sel="note" data-path="Knowledge Base/周记-2026W36.md" data-name="周记-2026W36">
+        <svg class="ico" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1.5A1.5 1.5 0 014.5 0h5.086a1.5 1.5 0 011.06.44l2.914 2.914a1.5 1.5 0 01.44 1.06V13.5A1.5 1.5 0 0112.5 15h-8A1.5 1.5 0 013 13.5v-12z"/></svg>
+        周记-2026W36.md
+      </button>
+      <button class="tree-item folder" data-sel="folder" data-path="Projects" data-name="Projects">
+        <svg class="ico" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 2.5A1.5 1.5 0 013 1h3.5a.5.5 0 01.4.2L8 2.5h5A1.5 1.5 0 0114.5 4v8.5a1.5 1.5 0 01-1.5 1.5H3A1.5 1.5 0 011.5 12.5v-10z"/></svg>
+        Projects
+      </button>
+      <button class="tree-item indent-1" data-sel="note" data-path="Projects/MDFriday Roadmap.md" data-name="MDFriday Roadmap">
+        <svg class="ico" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1.5A1.5 1.5 0 014.5 0h5.086a1.5 1.5 0 011.06.44l2.914 2.914a1.5 1.5 0 01.44 1.06V13.5A1.5 1.5 0 0112.5 15h-8A1.5 1.5 0 013 13.5v-12z"/></svg>
+        MDFriday Roadmap.md
+      </button>
+    </aside>
+
+    <main class="editor-pane">
+      <div class="tab-bar">
+        <div class="editor-tab">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1.5A1.5 1.5 0 014.5 0h5.086a1.5 1.5 0 011.06.44l2.914 2.914a1.5 1.5 0 01.44 1.06V13.5A1.5 1.5 0 0112.5 15h-8A1.5 1.5 0 013 13.5v-12z"/></svg>
+          <span id="editorTabName">设计思考.md</span>
+        </div>
+      </div>
+      <div class="editor-body">
+        <h1>设计思考</h1>
+        <div class="editor-meta">最后编辑 · 今天 14:22 · 知识库</div>
+        <p>发布体验应当像 Apple 产品页一样克制：一个主操作、足够留白、状态一句话说清。</p>
+        <div class="md-h2">右侧边栏优于弹窗</div>
+        <p>在 Obsidian 中，发布面板作为 <code>WorkspaceLeaf</code> 落在右侧，能与编辑器并列对照，而不是打断心流的 Modal。</p>
+        <blockquote>原样发布：尽量保留本地预览的主题、插件渲染与 CSS snippets。</blockquote>
+        <div class="md-h2">选择类型决定发布模式</div>
+        <p>单篇笔记默认「原样发布」，也可切换「单页主题」。文件夹不支持原样，走 Wiki 数字花园路径。</p>
+      </div>
+      <div class="context-menu" id="contextMenu" style="top: 120px; left: 80px;">
+        <button class="ctx-item">在新标签打开</button>
+        <button class="ctx-item">重命名</button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item accent" id="ctxPublish">发布到 MDFriday</button>
+        <button class="ctx-item">复制路径</button>
+      </div>
+    </main>
+
+    <aside class="publish-panel" id="publishPanel">
+      <div class="panel-header">
+        <div class="panel-title-row">
+          <header class="mdf-brand-header">
+            <a class="mdf-brand-link" href="https://mdfriday.com" target="_blank" rel="noopener noreferrer" title="MDFriday">
+              <img class="mdf-logo" src="https://gohugo.net/mdfriday.svg" width="18" height="18" alt="MDFriday" />
+              <span class="mdf-brand-title">MDFriday Publish</span>
+            </a>
+          </header>
+          <button class="plan-pill guest" id="planPill" title="查看计划状态">Guest</button>
+        </div>
+        <div class="panel-tabs">
+          <button class="panel-tab active" data-tab="publish">发布</button>
+          <button class="panel-tab" data-tab="history">历史</button>
+        </div>
+        <div class="plan-popover" id="planPopover" role="dialog" aria-label="计划对比">
+          <div class="pp-title">选择适合你的计划</div>
+          <div class="pp-note">侧栏仅展示状态与轻量升级；完整订阅管理在 Obsidian 设置 → MDFriday。</div>
+
+          <div class="pp-tier" data-plan-pick="guest">
+            <div class="pp-head">
+              <div class="pp-name">Guest</div>
+              <span class="pp-tag">当前</span>
+            </div>
+            <div class="pp-best">最适合：第一次试试</div>
+            <div class="pp-price"><span class="muted">免费 · 无需账号</span></div>
+            <ul class="pp-benefits">
+              <li>无需账号即可发布</li>
+              <li>站点 / 构建 / 导出不限次数</li>
+              <li>5 MB 存储</li>
+              <li>全球 CDN 与分享链接</li>
+              <li>Note & Wiki 主题 · 本地预览</li>
+              <li class="note">内容在下一个 UTC 00:00 清空（认领到 Free 可保留）</li>
+            </ul>
+            <a class="pp-cta secondary" data-cta="guest" href="https://obsidian.md/plugins?search=mdfriday-publish" target="_blank" rel="noopener">安装插件</a>
+          </div>
+
+          <div class="pp-tier" data-plan-pick="free">
+            <div class="pp-head">
+              <div class="pp-name">Free</div>
+              <span class="pp-tag">升级</span>
+            </div>
+            <div class="pp-best">最适合：持续免费发布</div>
+            <div class="pp-price"><span class="muted">免费 · 注册即可</span></div>
+            <ul class="pp-benefits">
+              <li>注册后认领 Guest 站点，按月持续发布</li>
+              <li>包含 Guest 全部能力</li>
+              <li>50 MB 存储</li>
+              <li>认领 Guest 站点并保留同一 URL</li>
+              <li>在账号中管理站点与发布</li>
+              <li class="note">站点于每月 1 日清空</li>
+            </ul>
+            <!-- product: https://mdfriday.com/account/ · proto may use localhost:8080/account/ -->
+            <a class="pp-cta" data-cta="free" href="https://mdfriday.com/account/">免费注册</a>
+          </div>
+
+          <div class="pp-tier" data-plan-pick="personal">
+            <div class="pp-head">
+              <div class="pp-name">Personal</div>
+              <span class="pp-tag">升级</span>
+            </div>
+            <div class="pp-best">最适合：自己的域名与长期站点</div>
+            <div class="pp-price">$5 <span class="muted">/ 月</span></div>
+            <ul class="pp-benefits">
+              <li>包含 Free 全部能力</li>
+              <li>1 GB 存储</li>
+              <li>永久保留站点</li>
+              <li>1 个自定义域名 · 自动 HTTPS</li>
+              <li>发布历史与回滚</li>
+            </ul>
+            <a class="pp-cta" data-cta="personal" href="https://mdfriday.com/account/">升级到 Personal</a>
+          </div>
+
+          <div class="pp-footer">完整计费、发票与取消请前往 <strong>设置 → MDFriday</strong>。</div>
+        </div>
+      </div>
+
+      <div class="panel-scroll" id="tabPublish">
+        <div id="viewIdle">
+          <div class="project-strip" id="projectStrip">
+            <div class="status-row">
+              <span class="status-dot" id="statusDot"></span>
+              <span class="status-text" id="statusText">已发布</span>
+            </div>
+            <div class="url-line" id="projectUrl" title="点击复制">https://wayde.mdfriday.com/design-notes</div>
+            <div class="meta-line" id="projectMeta">上次发布 · 今天 14:08</div>
+            <div class="remember-badge" id="rememberBadge">✓ 已记住上次设置</div>
+            <div class="preview-live-row" id="previewLiveRow" style="display:none;">
+              <span class="pl-dot" aria-hidden="true"></span>
+              <div class="pl-body">
+                <div class="pl-title">本地预览进行中</div>
+                <div class="pl-url" id="previewLiveUrl">http://127.0.0.1:4321/</div>
+              </div>
+              <button type="button" class="pl-stop" id="btnStopPreviewStrip">停止</button>
+            </div>
+            <div class="preview-stopped-row" id="previewStoppedRow" style="display:none;">
+              <span class="ps-dot" aria-hidden="true"></span>
+              <span id="previewStoppedText">上次预览 · 已停止</span>
+            </div>
+          </div>
+          <div class="card" id="unpublishedCard" style="display:none; padding:10px 14px;">
+            <div class="status-row" style="margin:0;">
+              <span class="status-dot unpublished"></span>
+              <span class="status-text" style="font-size:12px;font-weight:600;">未发布</span>
+            </div>
+            <div class="helper" style="margin-top:4px;">首次发布后将绑定为项目，并记住你的选项。</div>
+            <div class="preview-live-row" id="previewLiveRowUnpub" style="display:none;">
+              <span class="pl-dot" aria-hidden="true"></span>
+              <div class="pl-body">
+                <div class="pl-title">本地预览进行中</div>
+                <div class="pl-url" id="previewLiveUrlUnpub">http://127.0.0.1:4321/</div>
+              </div>
+              <button type="button" class="pl-stop" id="btnStopPreviewUnpub">停止</button>
+            </div>
+            <div class="preview-stopped-row" id="previewStoppedRowUnpub" style="display:none;">
+              <span class="ps-dot" aria-hidden="true"></span>
+              <span id="previewStoppedTextUnpub">上次预览 · 已停止</span>
+            </div>
+          </div>
+
+          <div class="section-label">发布对象</div>
+          <div class="card">
+            <div class="target-card">
+              <div class="target-icon" id="targetIcon">📄</div>
+              <div class="target-info">
+                <div class="target-name" id="targetName">设计思考</div>
+                <div class="target-path" id="targetPath">Knowledge Base/设计思考.md</div>
+              </div>
+            </div>
+            <div class="sel-switch" id="selSwitch">
+              <button class="active" data-sel="note">单篇笔记</button>
+              <button data-sel="folder">文件夹</button>
+            </div>
+            <p class="helper">原型演示：切换以查看发布方式分叉。</p>
+          </div>
+
+          <div class="section-label">发布方式</div>
+          <div class="card" style="padding:10px;">
+            <div class="mode-seg" id="modeSeg"></div>
+            <p class="helper" id="modeHelper"></p>
+          </div>
+
+          <div id="themeSection">
+            <div class="section-label" id="themeSectionLabel">单页主题</div>
+            <div class="theme-list" id="themeList"></div>
+          </div>
+
+          <div class="upgrade-banner" id="upgradeBanner"></div>
+
+          <button class="advanced-toggle" id="advancedToggle">
+            高级选项 <span class="chev">▾</span>
+          </button>
+          <div class="advanced-body" id="advancedBody">
+            <div class="field-group">
+              <div class="toggle-row">
+                <span class="field-label" style="margin:0;">访问密码</span>
+                <button class="toggle" id="pwdToggle" aria-label="启用密码"></button>
+              </div>
+              <input class="field-input" id="pwdInput" type="password" placeholder="留空则公开访问" disabled />
+              <p class="helper" id="pwdHelper">访客需输入密码才能查看</p>
+            </div>
+            <div class="field-group">
+              <div class="field-label">
+                自定义域名
+                <span class="domain-status" id="domainStatus">未绑定</span>
+              </div>
+              <input class="field-input" id="domainInput" type="text" placeholder="notes.example.com" />
+              <p class="helper" id="domainHelper">绑定后通过你的域名访问已发布站点</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="state-view" id="viewVerify">
+          <div class="verify-icon">🛡</div>
+          <div class="state-title">需要人机验证</div>
+          <div class="state-desc">Guest 首次发布需在 mdfriday.com 完成验证，确认你是真人。</div>
+          <div class="verify-steps">
+            <ol>
+              <li>点击下方前往 mdfriday.com</li>
+              <li>完成人机验证（Turnstile）</li>
+              <li>回到 Obsidian，继续发布</li>
+            </ol>
+          </div>
+          <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
+            <button class="btn btn-primary btn-full" id="btnGoVerify">前往 mdfriday.com 验证</button>
+            <button class="btn btn-secondary btn-full" id="btnMockVerified">我已完成验证</button>
+            <button class="btn btn-ghost" id="btnVerifyCancel">取消</button>
+          </div>
+        </div>
+
+        <div class="state-view" id="viewBuilding">
+          <div class="spinner"></div>
+          <div class="state-title">正在构建…</div>
+          <div class="state-desc" id="buildingStep">本地预览 · 启动本地服务</div>
+          <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        </div>
+
+        <div class="state-view" id="viewResult">
+          <div class="result-badge publish" id="resultBadge">已发布</div>
+          <div class="success-check" id="resultCheck">✓</div>
+          <div class="state-title" id="resultTitle">发布成功</div>
+          <div class="state-desc" id="resultDesc">你的内容已上线，可分享链接给任何人。</div>
+          <div class="success-url-box">
+            <div class="url" id="resultUrl">https://wayde.mdfriday.com/design-notes</div>
+            <div class="success-actions">
+              <button class="btn btn-secondary btn-sm" id="btnCopyUrl">复制</button>
+              <button class="btn btn-primary btn-sm" id="btnOpenUrl">打开</button>
+            </div>
+          </div>
+          <p class="result-helper" id="resultHelper" style="display:none;">预览仅在本机有效，不会写入发布历史</p>
+          <div class="result-secondary-wrap">
+            <button class="btn-danger-soft" id="btnResultSecondary" style="margin-top:0;">撤销发布</button>
+            <button class="btn btn-ghost" id="btnResultBack">返回</button>
+          </div>
+        </div>
+
+        <div class="state-view" id="viewSoftgate">
+          <div style="font-size:32px;margin-bottom:12px;">✦</div>
+          <div class="state-title">认领到 Free 以继续</div>
+          <div class="state-desc">免费注册即可认领 Guest 站点、保留同一 URL，并获得 50 MB 存储。站点于每月 1 日清空。</div>
+          <div style="width:100%;margin-top:20px;display:flex;flex-direction:column;gap:8px;">
+            <button class="btn btn-primary btn-full" id="btnRegister">免费注册</button>
+            <button class="btn btn-secondary btn-full" id="btnSoftLater">稍后再说</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-scroll hidden" id="tabHistory">
+        <div class="section-label">发布历史</div>
+        <div id="historyLocked" class="history-locked hidden">
+          <div class="ico">🔒</div>
+          <div class="hl-title">发布历史与回滚</div>
+          <div class="hl-desc">Personal 计划可用：查看版本历史、回滚到任意发布。Guest / Free 不提供此能力。</div>
+          <button class="btn btn-primary btn-sm" id="btnUpgradeHistory" type="button">升级到 Personal</button>
+        </div>
+        <div id="historyList"></div>
+        <div class="history-empty hidden" id="historyEmpty">
+          <div class="ico">🕐</div>
+          <div style="font-size:14px;font-weight:500;color:var(--apple-text);margin-bottom:4px;">暂无历史</div>
+          <div style="font-size:12px;">成功发布后，版本会出现在这里，支持回滚与撤销发布。</div>
+        </div>
+      </div>
+
+      <div class="panel-actions" id="panelActions">
+        <button class="btn btn-secondary" id="btnPreview">预览</button>
+        <button class="btn btn-primary" id="btnPublish">发布</button>
+      </div>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <div class="confirm-overlay" id="confirmOverlay">
+    <div class="confirm-box">
+      <h3 id="confirmTitle">回滚到此版本？</h3>
+      <p id="confirmText">将用该历史版本覆盖当前已发布站点。</p>
+      <div class="confirm-actions">
+        <button class="btn btn-secondary" id="confirmCancel">取消</button>
+        <button class="btn btn-primary" id="confirmOk">确认</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  const NOTE_THEMES = [
+    { id: 'note', name: 'Clean Note', color: '#E8F1FF', demo: 'https://demo.mdfriday.com/themes/note' },
+    { id: 'essay', name: 'Essay', color: '#FFF3E0', demo: 'https://demo.mdfriday.com/themes/essay' },
+    { id: 'portfolio', name: 'Portfolio', color: '#F3E8FF', demo: 'https://demo.mdfriday.com/themes/portfolio' },
+    { id: 'minimal', name: 'Minimal Light', color: '#E8F8ED', demo: 'https://demo.mdfriday.com/themes/minimal' },
+    { id: 'magazine', name: 'Magazine', color: '#FFE8EC', demo: 'https://demo.mdfriday.com/themes/magazine' },
+  ];
+
+  const WIKI_THEMES = [
+    { id: 'quartz', name: 'Quartz Garden', color: '#E8F1FF', demo: 'https://demo.mdfriday.com/themes/quartz' },
+    { id: 'publish', name: 'Publish Classic', color: '#F3E8FF', demo: 'https://demo.mdfriday.com/themes/publish-classic' },
+    { id: 'garden', name: 'Digital Garden', color: '#E8F8ED', demo: 'https://demo.mdfriday.com/themes/garden' },
+  ];
+
+  const projects = {
+    'Knowledge Base/设计思考.md': {
+      published: true,
+      status: 'live',
+      url: 'https://wayde.mdfriday.com/design-notes',
+      lastPublished: '今天 14:08',
+      mode: 'asis',
+      themeId: 'note',
+      passwordOn: false,
+      domain: '',
+      domainBound: false,
+      history: [
+        { id: 'h1', time: '今天 14:08', mode: '原样发布', theme: '—', status: '成功', url: 'https://wayde.mdfriday.com/design-notes', live: true },
+        { id: 'h2', time: '昨天 19:32', mode: '单页主题', theme: 'Essay', status: '成功', url: 'https://wayde.mdfriday.com/design-notes', live: false },
+        { id: 'h3', time: '9月5日 11:04', mode: '原样发布', theme: '—', status: '成功', url: 'https://wayde.mdfriday.com/design-notes', live: false },
+      ],
+    },
+  };
+
+  const state = {
+    plan: 'guest',
+    uiState: 'idle', // idle | verify | building | result | softgate
+    flowKind: 'publish', // publish | preview — shared building/result chrome
+    tab: 'publish',
+    selection: 'note',
+    path: 'Knowledge Base/设计思考.md',
+    name: '设计思考',
+    mode: 'asis',
+    themeId: 'note',
+    passwordOn: false,
+    password: '',
+    domain: '',
+    domainBound: false,
+    advancedOpen: false,
+    planPopoverOpen: false,
+    firstPublishVerified: false,
+    pendingConfirm: null,
+    // Local preview (not history). Survives across idle; stopped keeps muted "上次预览".
+    previewRunning: false,
+    previewUrl: '',
+    lastPreviewUrl: '',
+    previewStopped: false,
+    resultUrl: '',
+  };
+
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => [...document.querySelectorAll(s)];
+
+  function toast(msg) {
+    const el = $('#toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.classList.remove('show'), 2200);
+  }
+
+  function currentProject() { return projects[state.path] || null; }
+
+  function ensureProject() {
+    if (!projects[state.path]) {
+      projects[state.path] = {
+        published: false, status: 'unpublished', url: '', lastPublished: '',
+        mode: state.selection === 'folder' ? 'wiki' : 'asis',
+        themeId: state.selection === 'folder' ? 'quartz' : 'note',
+        passwordOn: false, domain: '', domainBound: false, history: [],
+      };
+    }
+    return projects[state.path];
+  }
+
+  function restoreFromMemory() {
+    const p = currentProject();
+    if (p && (p.published || p.status === 'revoked')) {
+      state.mode = p.mode;
+      state.themeId = p.themeId;
+      state.passwordOn = p.passwordOn;
+      state.domain = p.domain || '';
+      state.domainBound = !!p.domainBound;
+    } else {
+      state.mode = state.selection === 'folder' ? 'wiki' : 'asis';
+      state.themeId = state.selection === 'folder' ? 'quartz' : 'note';
+      state.passwordOn = false;
+      state.domain = '';
+      state.domainBound = false;
+    }
+    if (state.selection === 'folder' && state.mode === 'asis') state.mode = 'wiki';
+    if (state.selection === 'note' && state.mode === 'wiki') state.mode = 'asis';
+  }
+
+  function planLabel(p) {
+    return { guest: 'Guest', free: 'Free', personal: 'Personal' }[p];
+  }
+  function canUsePassword() { return state.plan === 'personal'; }
+  function canUseDomain() { return state.plan === 'personal'; }
+  function canUseHistory() { return state.plan === 'personal'; }
+  function needsTurnstile() { return state.plan === 'guest' && !state.firstPublishVerified; }
+
+  function formatNow() {
+    const d = new Date();
+    const hh = (d.getUTCHours() + 8) % 24;
+    const m = String(d.getUTCMinutes()).padStart(2, '0');
+    return '今天 ' + String(hh).padStart(2, '0') + ':' + m;
+  }
+
+  function slugify(name) {
+    return name.replace(/\s+/g, '-').replace(/\.md$/i, '').toLowerCase()
+      .replace(/[^\w\u4e00-\u9fff-]/g, '') || 'page';
+  }
+
+  function buildUrl() {
+    if (state.domainBound && state.domain) return 'https://' + state.domain;
+    const base = state.plan === 'guest' ? 'https://share.mdfriday.com' : 'https://wayde.mdfriday.com';
+    return base + '/' + slugify(state.name);
+  }
+
+  function buildLocalPreviewUrl() {
+    // Prototype: stable local port; real plugin would allocate a free port.
+    return 'http://127.0.0.1:4321/';
+  }
+
+  function modeLabel(mode) {
+    return { asis: '原样发布', single: '单页主题', wiki: 'Wiki 发布' }[mode] || mode;
+  }
+
+  function themeName(id) {
+    const t = [...NOTE_THEMES, ...WIKI_THEMES].find((x) => x.id === id);
+    return t ? t.name : '—';
+  }
+
+  function render() {
+    renderPlanChrome();
+    renderPlanPopover();
+    renderTabs();
+    renderIdleForm();
+    renderStates();
+    renderHistory();
+    renderFooter();
+    renderEditor();
+    renderTreeBadges();
+    renderVerifiedToggle();
+  }
+
+  function renderPlanChrome() {
+    const pill = $('#planPill');
+    pill.textContent = planLabel(state.plan);
+    pill.className = 'plan-pill ' + state.plan + (state.planPopoverOpen ? ' open' : '');
+    $$('#planBtns .proto-btn').forEach((b) => b.classList.toggle('active', b.dataset.plan === state.plan));
+    $$('#stateBtns .proto-btn').forEach((b) => {
+      const kind = b.dataset.kind;
+      const matchState = b.dataset.state === state.uiState;
+      const matchKind = !kind || kind === state.flowKind;
+      b.classList.toggle('active', matchState && matchKind);
+    });
+  }
+
+  function renderPlanPopover() {
+    const pop = $('#planPopover');
+    if (!pop) return;
+    pop.classList.toggle('show', state.planPopoverOpen);
+    pop.querySelectorAll('.pp-tier').forEach((tier) => {
+      const pick = tier.dataset.planPick;
+      const isCurrent = pick === state.plan;
+      tier.classList.toggle('current', isCurrent);
+      const tag = tier.querySelector('.pp-tag');
+      if (tag) {
+        if (isCurrent) tag.textContent = '当前';
+        else if (pick === 'guest') tag.textContent = '试用';
+        else if (pick === 'free') tag.textContent = '免费';
+        else tag.textContent = '升级';
+      }
+      const cta = tier.querySelector('[data-cta]');
+      if (!cta) return;
+      if (isCurrent) {
+        cta.className = 'pp-cta current-cta';
+        cta.textContent = '当前计划';
+        cta.removeAttribute('href');
+        cta.setAttribute('aria-disabled', 'true');
+      } else if (pick === 'guest') {
+        cta.className = 'pp-cta secondary';
+        cta.textContent = '安装插件';
+        cta.href = 'https://obsidian.md/plugins?search=mdfriday-publish';
+        cta.removeAttribute('aria-disabled');
+      } else if (pick === 'free') {
+        cta.className = 'pp-cta';
+        cta.textContent = '免费注册';
+        cta.href = 'https://mdfriday.com/account/';
+        cta.removeAttribute('aria-disabled');
+      } else {
+        cta.className = 'pp-cta';
+        cta.textContent = '升级到 Personal';
+        cta.href = 'https://mdfriday.com/account/';
+        cta.removeAttribute('aria-disabled');
+      }
+    });
+  }
+
+  function renderVerifiedToggle() {
+    const btn = $('#btnToggleVerified');
+    if (!btn) return;
+    btn.textContent = state.firstPublishVerified ? '已验证' : '未验证';
+    btn.classList.toggle('active', state.firstPublishVerified);
+  }
+
+  function renderTabs() {
+    $$('.panel-tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === state.tab));
+    $('#tabPublish').classList.toggle('hidden', state.tab !== 'publish');
+    $('#tabHistory').classList.toggle('hidden', state.tab !== 'history');
+  }
+
+  function syncPreviewRows(liveId, urlId, stoppedId, textId) {
+    const live = $(liveId);
+    const stopped = $(stoppedId);
+    if (!live || !stopped) return;
+    if (state.previewRunning && state.previewUrl) {
+      live.style.display = '';
+      stopped.style.display = 'none';
+      const urlEl = $(urlId);
+      if (urlEl) urlEl.textContent = state.previewUrl;
+    } else if (state.previewStopped && state.lastPreviewUrl) {
+      live.style.display = 'none';
+      stopped.style.display = '';
+      const t = $(textId);
+      if (t) t.textContent = '上次预览 · 已停止';
+    } else {
+      live.style.display = 'none';
+      stopped.style.display = 'none';
+    }
+  }
+
+  function renderIdleForm() {
+    if (state.tab !== 'publish') return;
+    const p = currentProject();
+    const isLive = p && p.published && p.status !== 'revoked';
+    const isRevoked = p && p.status === 'revoked';
+    const showStrip = isLive || isRevoked;
+    $('#projectStrip').style.display = showStrip ? '' : 'none';
+    $('#unpublishedCard').style.display = showStrip ? 'none' : '';
+    if (showStrip) {
+      $('#projectStrip').classList.toggle('revoked', !!isRevoked);
+      $('#statusDot').className = 'status-dot' + (isRevoked ? ' revoked' : '');
+      $('#statusText').textContent = isRevoked ? '已撤销 · 未公开' : '已发布';
+      const urlEl = $('#projectUrl');
+      urlEl.textContent = p.url || '（此前 URL 已下线）';
+      urlEl.classList.toggle('disabled', !!isRevoked);
+      urlEl.title = isRevoked ? '已撤销，URL 不可用' : '点击复制';
+      $('#projectMeta').textContent = isRevoked
+        ? '已撤销 · 设置仍保留，可再次发布'
+        : ('上次发布 · ' + p.lastPublished);
+      $('#rememberBadge').style.display = '';
+      $('#rememberBadge').textContent = isRevoked ? '✓ 已记住上次设置（可一键再发）' : '✓ 已记住上次设置';
+      syncPreviewRows('#previewLiveRow', '#previewLiveUrl', '#previewStoppedRow', '#previewStoppedText');
+    } else {
+      syncPreviewRows('#previewLiveRowUnpub', '#previewLiveUrlUnpub', '#previewStoppedRowUnpub', '#previewStoppedTextUnpub');
+    }
+    $('#targetIcon').textContent = state.selection === 'folder' ? '📁' : '📄';
+    $('#targetName').textContent = state.name;
+    $('#targetPath').textContent = state.path;
+    $$('#selSwitch button').forEach((b) => b.classList.toggle('active', b.dataset.sel === state.selection));
+    renderModes();
+    renderThemes();
+    renderAdvanced();
+    renderBanner();
+  }
+
+  function renderModes() {
+    const seg = $('#modeSeg');
+    const helper = $('#modeHelper');
+    if (state.selection === 'note') {
+      seg.innerHTML =
+        '<button class="mode-option ' + (state.mode === 'asis' ? 'active' : '') + '" data-mode="asis">' +
+        '<div class="mode-row"><div style="flex:1"><div class="mode-title">原样发布</div>' +
+        '<div class="mode-desc">保留本地预览：主题、社区插件渲染、CSS snippets</div></div><div class="radio"></div></div></button>' +
+        '<button class="mode-option ' + (state.mode === 'single' ? 'active' : '') + '" data-mode="single">' +
+        '<div class="mode-row"><div style="flex:1"><div class="mode-title">单页主题</div>' +
+        '<div class="mode-desc">精选单页主题，带 Live demo</div></div><div class="radio"></div></div></button>';
+      helper.textContent = state.mode === 'asis'
+        ? '默认推荐。尽量贴近 Obsidian 本地预览效果。'
+        : '选择主题后可打开 Live demo 预览效果。';
+      helper.classList.remove('warn');
+    } else {
+      seg.innerHTML =
+        '<button class="mode-option" data-mode="asis" disabled>' +
+        '<div class="mode-row"><div style="flex:1"><div class="mode-title">原样发布 <span class="disabled-tag">不可用</span></div>' +
+        '<div class="mode-desc">文件夹无法原样发布：多页结构需要 Wiki 引擎解析双向链接与图谱。</div></div><div class="radio"></div></div></button>' +
+        '<button class="mode-option ' + (state.mode === 'wiki' ? 'active' : '') + '" data-mode="wiki">' +
+        '<div class="mode-row"><div style="flex:1"><div class="mode-title">Wiki 发布</div>' +
+        '<div class="mode-desc">Quartz / Obsidian Publish 风格数字花园 · 图谱 · 多页</div></div><div class="radio"></div></div></button>';
+      helper.textContent = '文件夹默认且仅支持 Wiki 发布。可选皮肤变体见下方。';
+      helper.classList.add('warn');
+    }
+    seg.querySelectorAll('.mode-option:not(:disabled)').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.mode = btn.dataset.mode;
+        if (state.mode === 'single' && !NOTE_THEMES.find((t) => t.id === state.themeId)) state.themeId = 'note';
+        if (state.mode === 'wiki' && !WIKI_THEMES.find((t) => t.id === state.themeId)) state.themeId = 'quartz';
+        render();
+      });
+    });
+  }
+
+  function renderThemes() {
+    const section = $('#themeSection');
+    const show = (state.selection === 'note' && state.mode === 'single')
+      || (state.selection === 'folder' && state.mode === 'wiki');
+    section.style.display = show ? '' : 'none';
+    if (!show) return;
+    const themes = state.mode === 'wiki' ? WIKI_THEMES : NOTE_THEMES;
+    $('#themeSectionLabel').textContent = state.mode === 'wiki' ? 'Wiki 皮肤' : '单页主题';
+    const list = $('#themeList');
+    list.innerHTML = themes.map((t) =>
+      '<button class="theme-row ' + (state.themeId === t.id ? 'selected' : '') + '" data-theme="' + t.id + '">' +
+      '<div class="theme-meta"><div class="theme-name">' + t.name + '</div></div>' +
+      '<a class="theme-demo" href="' + t.demo + '" data-demo="' + t.demo + '">Live demo</a>' +
+      '<div class="theme-check">✓</div></button>'
+    ).join('');
+    list.querySelectorAll('.theme-row').forEach((row) => {
+      row.addEventListener('click', (e) => {
+        if (e.target.classList.contains('theme-demo')) {
+          e.preventDefault();
+          e.stopPropagation();
+          toast('打开 Live demo · ' + e.target.dataset.demo);
+          return;
+        }
+        state.themeId = row.dataset.theme;
+        renderThemes();
+      });
+    });
+  }
+
+  function renderAdvanced() {
+    const toggle = $('#advancedToggle');
+    const body = $('#advancedBody');
+    toggle.classList.toggle('open', state.advancedOpen);
+    body.classList.toggle('open', state.advancedOpen);
+    const pwdOk = canUsePassword();
+    const pwdToggle = $('#pwdToggle');
+    const pwdInput = $('#pwdInput');
+    pwdToggle.classList.toggle('on', state.passwordOn && pwdOk);
+    pwdToggle.disabled = !pwdOk;
+    pwdInput.disabled = !pwdOk || !state.passwordOn;
+    pwdInput.value = state.password;
+    $('#pwdHelper').textContent = pwdOk ? '访客需输入密码才能查看' : 'Personal 计划可用 · 升级后解锁访问密码';
+    $('#pwdHelper').classList.toggle('lock', !pwdOk);
+    const domOk = canUseDomain();
+    const domainInput = $('#domainInput');
+    domainInput.disabled = !domOk;
+    domainInput.value = state.domain;
+    const ds = $('#domainStatus');
+    if (state.domainBound && state.domain) {
+      ds.textContent = '已绑定 ' + state.domain;
+      ds.className = 'domain-status bound';
+    } else {
+      ds.textContent = '未绑定';
+      ds.className = 'domain-status';
+    }
+    $('#domainHelper').textContent = domOk
+      ? '绑定后通过你的域名访问已发布站点'
+      : 'Guest / Free 锁定 · 升级 Personal 可配置自定义域名';
+    $('#domainHelper').classList.toggle('lock', !domOk);
+  }
+
+  function renderBanner() {
+    const el = $('#upgradeBanner');
+    if (state.plan === 'guest') {
+      el.style.display = '';
+      const v = state.firstPublishVerified ? '已完成首次验证' : '首次发布需人机验证';
+      el.innerHTML = 'Guest · 5 MB 存储 · 内容于下一个 <strong>UTC 00:00</strong> 清空（认领 Free 可保留） · ' + v +
+        ' · <button class="link" data-open-plan>查看计划</button>';
+    } else if (state.plan === 'free') {
+      el.style.display = '';
+      el.innerHTML = 'Free · 50 MB 存储 · 站点于<strong>每月 1 日</strong>清空 · 升级 Personal 可自定义域名、永久保留与发布历史 · ' +
+        '<button class="link" data-open-plan>查看计划</button>';
+    } else {
+      el.style.display = 'none';
+      el.innerHTML = '';
+    }
+    el.querySelectorAll('[data-open-plan]').forEach((b) => {
+      b.addEventListener('click', () => { state.planPopoverOpen = true; render(); });
+    });
+  }
+
+  function renderStates() {
+    const map = {
+      idle: '#viewIdle',
+      verify: '#viewVerify',
+      building: '#viewBuilding',
+      result: '#viewResult',
+      softgate: '#viewSoftgate',
+    };
+    Object.entries(map).forEach(([k, sel]) => {
+      const el = $(sel);
+      if (!el) return;
+      if (k === 'idle') {
+        el.classList.toggle('hidden', state.uiState !== 'idle' || state.tab !== 'publish');
+      } else {
+        const show = state.uiState === k && state.tab === 'publish';
+        el.classList.toggle('show', show);
+        el.classList.toggle('hidden', !show);
+      }
+    });
+    if (state.uiState === 'building') {
+      const step = $('#buildingStep');
+      if (step && !step.dataset.animating) {
+        step.textContent = state.flowKind === 'preview'
+          ? '本地预览 · 启动本地服务'
+          : '发布到 MDFriday · 上传资源';
+      }
+    }
+    if (state.uiState === 'result') {
+      renderResultView();
+    }
+  }
+
+  function renderResultView() {
+    const kind = state.flowKind;
+    const isPreview = kind === 'preview';
+    const badge = $('#resultBadge');
+    const check = $('#resultCheck');
+    const title = $('#resultTitle');
+    const desc = $('#resultDesc');
+    const urlEl = $('#resultUrl');
+    const helper = $('#resultHelper');
+    const secondary = $('#btnResultSecondary');
+    const back = $('#btnResultBack');
+
+    if (badge) {
+      badge.textContent = isPreview ? '本地预览' : '已发布';
+      badge.className = 'result-badge ' + (isPreview ? 'preview' : 'publish');
+    }
+    if (check) {
+      check.className = 'success-check' + (isPreview ? ' preview' : '');
+      check.textContent = '✓';
+    }
+    if (title) title.textContent = isPreview ? '预览已就绪' : '发布成功';
+    if (desc) {
+      desc.textContent = isPreview
+        ? '本地构建完成，已在本机启动预览服务。'
+        : '你的内容已上线，可分享链接给任何人。';
+    }
+    let url = state.resultUrl;
+    if (!url) {
+      if (isPreview) url = state.previewUrl || state.lastPreviewUrl || buildLocalPreviewUrl();
+      else {
+        const p = currentProject();
+        url = (p && p.url) ? p.url : buildUrl();
+      }
+    }
+    if (urlEl) urlEl.textContent = url;
+    if (helper) {
+      helper.style.display = isPreview ? '' : 'none';
+      helper.textContent = '预览仅在本机有效，不会写入发布历史';
+    }
+    if (secondary) {
+      secondary.textContent = isPreview ? '停止预览' : '撤销发布';
+      secondary.style.display = '';
+    }
+    if (back) back.textContent = '返回';
+  }
+
+  function renderHistory() {
+    const locked = $('#historyLocked');
+    const wrap = $('#historyList');
+    const empty = $('#historyEmpty');
+    if (!canUseHistory()) {
+      locked.classList.remove('hidden');
+      wrap.innerHTML = '';
+      empty.classList.add('hidden');
+      return;
+    }
+    locked.classList.add('hidden');
+    const p = currentProject();
+    const list = (p && p.history) ? p.history : [];
+    if (!list.length) {
+      wrap.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    const projectLive = p && p.published && p.status !== 'revoked';
+    wrap.innerHTML = list.map((h) => {
+      const badgeClass = h.status === '已回滚' ? 'rolled' : (h.status === '已撤销' ? 'revoked' : '');
+      const canUnpublish = projectLive && h.live && h.status === '成功';
+      return '<div class="history-item" data-hid="' + h.id + '">' +
+        '<div class="hi-top"><span class="hi-time">' + h.time + '</span>' +
+        '<span class="hi-badge ' + badgeClass + '">' + h.status + '</span></div>' +
+        '<div class="hi-meta">' + h.mode + (h.theme && h.theme !== '—' ? ' · ' + h.theme : '') +
+        '<br>' + (h.url || '') + '</div>' +
+        '<div class="hi-actions">' +
+        '<button class="btn btn-secondary btn-sm" data-view="' + h.id + '">查看</button>' +
+        '<button class="btn btn-sm btn-secondary" data-rollback="' + h.id + '">回滚</button>' +
+        (canUnpublish ? '<button class="btn btn-sm btn-danger-ghost" data-unpublish="' + h.id + '">撤销发布</button>' : '') +
+        '</div></div>';
+    }).join('');
+    wrap.querySelectorAll('[data-view]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const item = list.find((x) => x.id === b.dataset.view);
+        if (item) toast('打开 · ' + (item.url || '历史预览'));
+      });
+    });
+    wrap.querySelectorAll('[data-rollback]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const item = list.find((x) => x.id === b.dataset.rollback);
+        openConfirm({
+          type: 'rollback',
+          historyId: b.dataset.rollback,
+          title: '回滚到此版本？',
+          text: '将回滚到「' + (item ? item.time : '') + '」版本（' + (item ? item.mode : '') + '）。当前站点会被该版本覆盖，但仍保持公开。',
+          okLabel: '回滚',
+          danger: false,
+        });
+      });
+    });
+    wrap.querySelectorAll('[data-unpublish]').forEach((b) => {
+      b.addEventListener('click', () => {
+        openConfirm({
+          type: 'unpublish',
+          historyId: b.dataset.unpublish,
+          title: '撤销发布？',
+          text: '站点将下线，公开 URL 不可再访问。与回滚不同：撤销会移除公开可用性，而不是恢复某个历史版本。上次发布设置会保留，便于再次发布。',
+          okLabel: '撤销发布',
+          danger: true,
+        });
+      });
+    });
+  }
+
+  function renderFooter() {
+    const show = state.tab === 'publish' && state.uiState === 'idle';
+    const actions = $('#panelActions');
+    if (actions) {
+      actions.classList.toggle('is-hidden', !show);
+      actions.setAttribute('aria-hidden', show ? 'false' : 'true');
+    }
+    const btn = $('#btnPublish');
+    if (btn) btn.textContent = needsTurnstile() ? '验证并发布' : '发布';
+  }
+
+  function renderEditor() {
+    $('#editorTabName').textContent = state.selection === 'folder'
+      ? state.name + '/'
+      : (state.name.endsWith('.md') ? state.name : state.name + '.md');
+  }
+
+  function renderTreeBadges() {
+    function applyBadge(el, proj) {
+      if (!el) return;
+      if (proj && proj.published && proj.status !== 'revoked') {
+        el.style.display = '';
+        el.textContent = '已发';
+        el.classList.remove('revoked');
+      } else if (proj && proj.status === 'revoked') {
+        el.style.display = '';
+        el.textContent = '已撤';
+        el.classList.add('revoked');
+      } else {
+        el.style.display = 'none';
+      }
+    }
+    applyBadge($('#badgeNote'), projects['Knowledge Base/设计思考.md']);
+    applyBadge($('#badgeFolder'), projects['Knowledge Base']);
+    $$('.tree-item').forEach((item) => item.classList.toggle('active', item.dataset.path === state.path));
+  }
+
+  function setSelection(sel, path, name) {
+    state.selection = sel;
+    state.path = path;
+    state.name = name;
+    if (sel === 'folder') {
+      state.mode = 'wiki';
+      if (!WIKI_THEMES.find((t) => t.id === state.themeId)) state.themeId = 'quartz';
+    }
+    restoreFromMemory();
+    state.uiState = 'idle';
+    state.tab = 'publish';
+    state.planPopoverOpen = false;
+    render();
+  }
+
+  function requestPublish() {
+    if (needsTurnstile()) {
+      state.uiState = 'verify';
+      state.flowKind = 'publish';
+      render();
+      return;
+    }
+    startBuild('publish');
+  }
+
+  function requestPreview() {
+    // Preview is local-only: no Turnstile / plan gate.
+    if (state.previewRunning) {
+      toast('本地预览已在运行');
+      state.uiState = 'result';
+      state.flowKind = 'preview';
+      state.resultUrl = state.previewUrl;
+      render();
+      return;
+    }
+    startBuild('preview');
+  }
+
+  let buildTimer = null;
+
+  function startBuild(kind) {
+    if (buildTimer) { clearInterval(buildTimer); buildTimer = null; }
+    state.flowKind = kind;
+    state.uiState = 'building';
+    state.tab = 'publish';
+    render();
+    const fill = $('#progressFill');
+    const stepEl = $('#buildingStep');
+    if (fill) fill.style.width = '0%';
+    if (stepEl) {
+      stepEl.dataset.animating = '1';
+      stepEl.textContent = kind === 'preview'
+        ? '本地预览 · 启动本地服务'
+        : '发布到 MDFriday · 上传资源';
+    }
+    let step = 0;
+    const previewSteps = [
+      '本地预览 · 生成本地页面',
+      '本地预览 · 应用主题',
+      '本地预览 · 启动本地服务',
+      '本地预览 · 启动本地服务',
+    ];
+    const publishSteps = [
+      '发布到 MDFriday · 生成页面',
+      '发布到 MDFriday · 应用主题',
+      '发布到 MDFriday · 上传资源',
+      '发布到 MDFriday · 上传资源',
+    ];
+    const steps = kind === 'preview' ? previewSteps : publishSteps;
+    buildTimer = setInterval(() => {
+      step++;
+      if (fill) fill.style.width = Math.min(step * 28, 100) + '%';
+      if (stepEl && steps[step - 1]) stepEl.textContent = steps[step - 1];
+      if (step >= 4) {
+        clearInterval(buildTimer);
+        buildTimer = null;
+        if (stepEl) delete stepEl.dataset.animating;
+        if (kind === 'preview') finishPreview();
+        else finishPublish();
+      }
+    }, 450);
+  }
+
+  function finishPreview() {
+    const url = buildLocalPreviewUrl();
+    state.previewRunning = true;
+    state.previewUrl = url;
+    state.lastPreviewUrl = url;
+    state.previewStopped = false;
+    state.resultUrl = url;
+    state.flowKind = 'preview';
+    state.uiState = 'result';
+    // Preview NEVER writes history.
+    render();
+    toast('预览已就绪 · ' + url);
+  }
+
+  function stopPreview() {
+    if (!state.previewRunning && !state.previewUrl) {
+      toast('当前没有运行中的预览');
+      return;
+    }
+    state.previewRunning = false;
+    state.previewStopped = true;
+    state.lastPreviewUrl = state.previewUrl || state.lastPreviewUrl || buildLocalPreviewUrl();
+    state.previewUrl = '';
+    toast('已停止本地预览');
+    if (state.uiState === 'result' && state.flowKind === 'preview') {
+      state.uiState = 'idle';
+    }
+    render();
+  }
+
+  function finishPublish() {
+    const p = ensureProject();
+    const url = buildUrl();
+    const time = formatNow();
+    p.published = true;
+    p.status = 'live';
+    p.url = url;
+    p.lastPublished = time;
+    p.mode = state.mode;
+    p.themeId = state.themeId;
+    p.passwordOn = state.passwordOn && canUsePassword();
+    p.domain = state.domain;
+    p.domainBound = !!(state.domain && canUseDomain() && state.domain.length > 3);
+    state.domainBound = p.domainBound;
+    p.history.forEach((h) => { if (h.live) h.live = false; });
+    const theme = (state.mode === 'asis') ? '—' : themeName(state.themeId);
+    p.history.unshift({
+      id: 'h' + Date.now(), time: time, mode: modeLabel(state.mode),
+      theme: theme, status: '成功', url: url, live: true,
+    });
+    state.resultUrl = url;
+    state.flowKind = 'publish';
+    state.uiState = 'result';
+    render();
+    toast('发布成功 · 已写入历史');
+  }
+
+  function doUnpublish() {
+    const p = currentProject();
+    if (!p) return;
+    p.published = false;
+    p.status = 'revoked';
+    p.history.forEach((h) => {
+      if (h.live && h.status === '成功') {
+        h.status = '已撤销';
+        h.live = false;
+      }
+    });
+    state.uiState = 'idle';
+    state.tab = 'publish';
+    toast('已撤销发布 · 站点已下线');
+    render();
+  }
+
+  function doRollback(historyId) {
+    const p = currentProject();
+    if (!p) return;
+    const item = p.history.find((h) => h.id === historyId);
+    if (!item) return;
+    p.history.forEach((h) => {
+      if (h.status === '已回滚') h.status = '成功';
+      h.live = false;
+    });
+    item.status = '已回滚';
+    item.live = true;
+    p.published = true;
+    p.status = 'live';
+    p.url = item.url;
+    p.lastPublished = formatNow() + '（回滚）';
+    toast('已回滚到 ' + item.time);
+    render();
+  }
+
+  function openConfirm(opts) {
+    state.pendingConfirm = opts;
+    $('#confirmTitle').textContent = opts.title;
+    $('#confirmText').textContent = opts.text;
+    const ok = $('#confirmOk');
+    ok.textContent = opts.okLabel || '确认';
+    ok.className = 'btn ' + (opts.danger ? 'btn-danger' : 'btn-primary');
+    $('#confirmOverlay').classList.add('show');
+  }
+
+  function pulsePanel() {
+    const panel = $('#publishPanel');
+    panel.classList.add('pulse');
+    setTimeout(() => panel.classList.remove('pulse'), 800);
+  }
+
+  $$('#planBtns .proto-btn').forEach((b) => {
+    b.addEventListener('click', () => { state.plan = b.dataset.plan; render(); });
+  });
+  $$('#stateBtns .proto-btn').forEach((b) => {
+    b.addEventListener('click', () => {
+      state.uiState = b.dataset.state;
+      if (b.dataset.kind) state.flowKind = b.dataset.kind;
+      state.tab = 'publish';
+      state.planPopoverOpen = false;
+      if (state.uiState === 'building') {
+        const fill = $('#progressFill');
+        if (fill) fill.style.width = '60%';
+        const step = $('#buildingStep');
+        if (step) {
+          step.textContent = state.flowKind === 'preview'
+            ? '本地预览 · 启动本地服务'
+            : '发布到 MDFriday · 上传资源';
+        }
+      }
+      if (state.uiState === 'result' && state.flowKind === 'preview') {
+        const url = state.previewUrl || state.lastPreviewUrl || buildLocalPreviewUrl();
+        state.resultUrl = url;
+        // Proto jump into preview result implies a running preview for strip continuity
+        state.previewRunning = true;
+        state.previewUrl = url;
+        state.lastPreviewUrl = url;
+        state.previewStopped = false;
+      }
+      if (state.uiState === 'result' && state.flowKind === 'publish') {
+        const p = currentProject();
+        state.resultUrl = (p && p.url) ? p.url : buildUrl();
+      }
+      render();
+    });
+  });
+
+  $('#btnToggleVerified').addEventListener('click', () => {
+    state.firstPublishVerified = !state.firstPublishVerified;
+    toast(state.firstPublishVerified ? '原型：已标记首次验证完成' : '原型：已清除首次验证');
+    render();
+  });
+
+  $('#btnShowMenu').addEventListener('click', () => $('#contextMenu').classList.add('show'));
+  $('#btnOpenPanel').addEventListener('click', () => {
+    state.tab = 'publish'; state.uiState = 'idle'; state.planPopoverOpen = false; pulsePanel(); render();
+  });
+  $('#btnResetMemory').addEventListener('click', () => {
+    Object.keys(projects).forEach((k) => delete projects[k]);
+    projects['Knowledge Base/设计思考.md'] = {
+      published: true,
+      status: 'live',
+      url: 'https://wayde.mdfriday.com/design-notes',
+      lastPublished: '今天 14:08',
+      mode: 'asis', themeId: 'note', passwordOn: false, domain: '', domainBound: false,
+      history: [
+        { id: 'h1', time: '今天 14:08', mode: '原样发布', theme: '—', status: '成功', url: 'https://wayde.mdfriday.com/design-notes', live: true },
+        { id: 'h2', time: '昨天 19:32', mode: '单页主题', theme: 'Essay', status: '成功', url: 'https://wayde.mdfriday.com/design-notes', live: false },
+      ],
+    };
+    state.firstPublishVerified = false;
+    state.previewRunning = false;
+    state.previewUrl = '';
+    state.lastPreviewUrl = '';
+    state.previewStopped = false;
+    state.resultUrl = '';
+    state.flowKind = 'publish';
+    restoreFromMemory();
+    toast('已重置项目记忆与验证标记');
+    render();
+  });
+
+  $('#planPill').addEventListener('click', (e) => {
+    e.stopPropagation();
+    state.planPopoverOpen = !state.planPopoverOpen;
+    render();
+  });
+
+  $('#planPopover').addEventListener('click', (e) => e.stopPropagation());
+
+  $$('#planPopover [data-plan-pick]').forEach((tier) => {
+    tier.addEventListener('click', (e) => {
+      if (e.target.closest('[data-cta]')) return; // CTA handled separately
+      const pick = tier.dataset.planPick;
+      if (pick === state.plan) {
+        toast('当前已是 ' + planLabel(pick));
+        return;
+      }
+      state.plan = pick;
+      toast(pick === 'guest' ? '已切换到 Guest（演示）' : '已切换到 ' + planLabel(pick) + '（演示）');
+      state.planPopoverOpen = false;
+      render();
+    });
+  });
+
+  $('#planPopover').addEventListener('click', (e) => {
+    const cta = e.target.closest('[data-cta]');
+    if (!cta) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const kind = cta.dataset.cta;
+    if (cta.classList.contains('current-cta') || kind === state.plan) {
+      toast('当前已是 ' + planLabel(state.plan));
+      return;
+    }
+    if (kind === 'guest') {
+      toast('打开插件页 · obsidian.md/plugins?search=mdfriday-publish');
+      // proto: also allow demo switch
+      state.plan = 'guest';
+    } else if (kind === 'free') {
+      toast('前往注册 · mdfriday.com/account/');
+      state.plan = 'free';
+    } else if (kind === 'personal') {
+      toast('升级 Personal · mdfriday.com/account/');
+      state.plan = 'personal';
+    }
+    state.planPopoverOpen = false;
+    render();
+  });
+
+  const btnUpgradeHistory = $('#btnUpgradeHistory');
+  if (btnUpgradeHistory) {
+    btnUpgradeHistory.addEventListener('click', () => {
+      state.planPopoverOpen = true;
+      state.tab = 'publish';
+      toast('查看 Personal 计划');
+      render();
+    });
+  }
+
+  $$('.panel-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      state.tab = tab.dataset.tab;
+      if (state.tab !== 'publish') state.uiState = 'idle';
+      state.planPopoverOpen = false;
+      render();
+    });
+  });
+
+  $$('#selSwitch button').forEach((b) => {
+    b.addEventListener('click', () => {
+      if (b.dataset.sel === 'note') setSelection('note', 'Knowledge Base/设计思考.md', '设计思考');
+      else setSelection('folder', 'Knowledge Base', 'Knowledge Base');
+    });
+  });
+
+  $$('.tree-item').forEach((item) => {
+    item.addEventListener('click', () => {
+      setSelection(item.dataset.sel, item.dataset.path, item.dataset.name);
+      pulsePanel();
+    });
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      setSelection(item.dataset.sel, item.dataset.path, item.dataset.name);
+      const m = $('#contextMenu');
+      m.style.top = Math.min(e.clientY - 41, window.innerHeight - 200) + 'px';
+      m.style.left = Math.min(e.clientX - 220, 400) + 'px';
+      m.classList.add('show');
+    });
+  });
+
+  $('#ctxPublish').addEventListener('click', () => {
+    $('#contextMenu').classList.remove('show');
+    state.tab = 'publish'; state.uiState = 'idle'; pulsePanel(); render();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.context-menu') && !e.target.closest('#btnShowMenu') && !e.target.closest('.tree-item')) {
+      $('#contextMenu').classList.remove('show');
+    }
+    if (!e.target.closest('#planPopover') && !e.target.closest('#planPill')) {
+      if (state.planPopoverOpen) {
+        state.planPopoverOpen = false;
+        renderPlanChrome();
+        renderPlanPopover();
+      }
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      $('#contextMenu').classList.remove('show');
+      $('#confirmOverlay').classList.remove('show');
+      if (state.planPopoverOpen) {
+        state.planPopoverOpen = false;
+        render();
+      }
+    }
+  });
+
+  $('#advancedToggle').addEventListener('click', () => {
+    state.advancedOpen = !state.advancedOpen;
+    renderAdvanced();
+  });
+
+  $('#pwdToggle').addEventListener('click', () => {
+    if (!canUsePassword()) { toast('升级 Personal 解锁访问密码'); return; }
+    state.passwordOn = !state.passwordOn;
+    renderAdvanced();
+  });
+  $('#pwdInput').addEventListener('input', (e) => { state.password = e.target.value; });
+  $('#domainInput').addEventListener('input', (e) => { state.domain = e.target.value.trim(); });
+  $('#domainInput').addEventListener('change', () => {
+    if (canUseDomain() && state.domain.length > 3) {
+      state.domainBound = true;
+      toast('域名状态：已绑定 ' + state.domain);
+    } else {
+      state.domainBound = false;
+    }
+    renderAdvanced();
+  });
+
+  $('#btnPreview').addEventListener('click', () => requestPreview());
+  $('#btnPublish').addEventListener('click', () => requestPublish());
+  $('#btnCopyUrl').addEventListener('click', () => {
+    const url = ($('#resultUrl') && $('#resultUrl').textContent) || state.resultUrl || '';
+    toast(url ? ('已复制 · ' + url) : '已复制');
+  });
+  $('#btnOpenUrl').addEventListener('click', () => {
+    const url = ($('#resultUrl') && $('#resultUrl').textContent) || state.resultUrl || '';
+    toast('打开 · ' + (url || (state.flowKind === 'preview' ? buildLocalPreviewUrl() : buildUrl())));
+  });
+  $('#btnResultBack').addEventListener('click', () => {
+    state.uiState = 'idle';
+    render();
+  });
+  $('#btnResultSecondary').addEventListener('click', () => {
+    if (state.flowKind === 'preview') {
+      stopPreview();
+      return;
+    }
+    openConfirm({
+      type: 'unpublish',
+      title: '撤销发布？',
+      text: '站点将下线，公开 URL 不可再访问。与回滚不同：撤销会移除公开可用性。上次发布设置会保留，便于再次发布。',
+      okLabel: '撤销发布',
+      danger: true,
+    });
+  });
+  function wireStopPreview(sel) {
+    const el = $(sel);
+    if (!el) return;
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      stopPreview();
+    });
+  }
+  wireStopPreview('#btnStopPreviewStrip');
+  wireStopPreview('#btnStopPreviewUnpub');
+  $('#btnGoVerify').addEventListener('click', () => toast('打开 mdfriday.com · 人机验证页（原型）'));
+  $('#btnMockVerified').addEventListener('click', () => {
+    state.firstPublishVerified = true;
+    toast('验证完成 · 继续发布');
+    startBuild('publish');
+  });
+  $('#btnVerifyCancel').addEventListener('click', () => { state.uiState = 'idle'; render(); });
+  $('#btnRegister').addEventListener('click', () => {
+    state.plan = 'free'; state.uiState = 'idle';
+    toast('免费注册 · mdfriday.com/account/（演示切到 Free）');
+    render();
+  });
+  $('#btnSoftLater').addEventListener('click', () => { state.uiState = 'idle'; render(); });
+  $('#projectUrl').addEventListener('click', () => {
+    const p = currentProject();
+    if (p && p.status === 'revoked') { toast('URL 已下线'); return; }
+    toast('已复制公开 URL');
+  });
+
+  $('#confirmCancel').addEventListener('click', () => {
+    $('#confirmOverlay').classList.remove('show');
+    state.pendingConfirm = null;
+  });
+  $('#confirmOk').addEventListener('click', () => {
+    const c = state.pendingConfirm;
+    $('#confirmOverlay').classList.remove('show');
+    state.pendingConfirm = null;
+    if (!c) return;
+    if (c.type === 'rollback') doRollback(c.historyId);
+    else if (c.type === 'unpublish') doUnpublish();
+  });
+
+  restoreFromMemory();
+  render();
+
+  setTimeout(() => {
+    $('#contextMenu').classList.add('show');
+    setTimeout(() => {
+      $('#contextMenu').classList.remove('show');
+      pulsePanel();
+    }, 1400);
+  }, 400);
+})();
+</script>
+</body>
+</html>

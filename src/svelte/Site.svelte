@@ -132,6 +132,9 @@
 	let buildProgress = 0;
 	let previewUrl = '';
 	let previewId = '';
+	let lastCompletedAction: 'preview' | 'publish' | null = null;
+	let publishRevoked = false;
+	let previewWasStopped = false;
 	let hasPreview = false;
 	let absPreviewDir = '';
 
@@ -462,8 +465,10 @@
 				isPublishing = false;
 				publishSuccess = true;
 				publishProgress = 100;
+				publishRevoked = false;
 				outputTab = 'online';
 				historyRefreshKey += 1;
+				lastCompletedAction = 'publish';
 				if (progress.data?.publishUrl) {
 					publishUrl = buildPublishUrl(progress.data.publishUrl);
 					persistLastPublishUrl(publishUrl);
@@ -559,6 +564,8 @@
 		isPreviewBuilding = false;
 		previewUrl = normalizeLocalPreviewUrl(result.url || '', result.port || serverPort);
 		outputTab = 'preview';
+		previewWasStopped = false;
+		lastCompletedAction = 'preview';
 		new Notice(t('ui.preview_success') || 'Local preview ready', 2500);
 		if (previewUrl) {
 			window.open(previewUrl, '_blank');
@@ -600,6 +607,7 @@
 	export function onPreviewStopped() {
 		serverRunning = false;
 		hasPreview = false;
+		previewWasStopped = true;
 		absPreviewDir = ''; // Clear preview directory path when stopped
 	}
 
@@ -627,7 +635,9 @@
 		isBuilding = false;
 		isPreviewBuilding = false;
 		publishSuccess = true;
+		publishRevoked = false;
 		authPrepareStep = 'idle';
+		lastCompletedAction = 'publish';
 
 		publishUrl = buildPublishUrl(result.url || '');
 		if (publishUrl) {
@@ -1308,8 +1318,9 @@
 		isPublishing = true;
 		publishProgress = 0;
 		publishSuccess = false;
-		publishUrl = '';
 		publishError = '';
+		lastCompletedAction = null;
+		publishRevoked = false;
 	}
 
 	async function resolveProjectPublicDir(): Promise<string | null> {
@@ -1347,6 +1358,8 @@
 		isPreviewBuilding = true;
 		buildProgress = 0;
 		hasPreview = false;
+		lastCompletedAction = null;
+		previewWasStopped = false;
 
 		try {
 			if (useFaithful) {
@@ -1376,6 +1389,8 @@
 				isBuilding = false;
 				buildProgress = 100;
 				outputTab = 'preview';
+				lastCompletedAction = 'preview';
+				previewWasStopped = false;
 				new Notice(t('ui.preview_success') || 'Local preview ready', 2500);
 				window.open(previewUrl, '_blank');
 				await persistPathConfigNow();
@@ -1508,6 +1523,10 @@
 	async function stopPreview() {
 		// Independent Obsidian local preview is not managed via Foundry stop
 		if (!plugin.currentProjectName) {
+			stopAllLocalPreviewServers();
+			hasPreview = false;
+			serverRunning = false;
+			previewWasStopped = true;
 			return;
 		}
 		
@@ -1518,6 +1537,10 @@
 					projectName: plugin.currentProjectName
 				});
 			}
+			stopAllLocalPreviewServers();
+			hasPreview = false;
+			serverRunning = false;
+			previewWasStopped = true;
 			
 			new Notice('Preview server stopped', 2000);
 		} catch (error) {
@@ -1525,6 +1548,17 @@
 			new Notice(`Error stopping preview: ${error.message}`, 3000);
 		}
 	}
+
+	function dismissPanelResult() {
+		lastCompletedAction = null;
+	}
+
+	function dismissAuthTip() {
+		showAuthTip = false;
+		authPrepareStep = 'idle';
+	}
+
+	$: pathRemembered = !!(activeVaultPath && plugin.settings.pathConfigs?.[activeVaultPath]);
 
 	async function stopPublish() {
 		// Reset publishing state
@@ -1982,6 +2016,8 @@
 
 		publishSuccess = false;
 		publishUrl = '';
+		publishRevoked = true;
+		lastCompletedAction = null;
 		await saveFoundryConfig('params.lastPublishUrl', '');
 		new Notice(t('ui.revoke_share_done'), 4000);
 	}
@@ -2014,22 +2050,25 @@
 	{showModeSwitch}
 	{showFolderModeFixed}
 	{showThemePicker}
-	{modeHint}
 	{themeList}
 	{selectedThemeSlug}
 	{themesLoading}
 	{sitePassword}
 	{showAuthTip}
+	{authPrepareStep}
 	{isPublishing}
 	{publishProgress}
-	{autoPublishEnabled}
 	{publishUrl}
 	{publishError}
 	hasContent={currentContents.length > 0}
+	{publishRevoked}
+	{pathRemembered}
 	{previewUrl}
 	{isPreviewBuilding}
 	{buildProgress}
-	{outputTab}
+	{hasPreview}
+	{previewWasStopped}
+	{lastCompletedAction}
 	{historyRefreshKey}
 	projectName={plugin.currentProjectName || projectName}
 	onSetMode={setPublishMode}
@@ -2038,15 +2077,16 @@
 	onPasswordChange={handlePasswordChange}
 	onPublish={startPublish}
 	onPreview={startPreview}
-	onStopPublish={stopPublish}
+	onStopPreview={stopPreview}
 	onOpenUrl={openPublishUrl}
 	onCopyUrl={copyPublishUrl}
 	onRevokeShare={revokeShare}
 	onOpenPreview={openPreviewUrl}
 	onCopyPreview={copyPreviewUrl}
-	onOutputTabChange={(tab) => (outputTab = tab)}
 	onContinueAuth={continueGuestKeySetup}
 	onOpenAccount={openAccountFromGrowth}
 	onDomainActive={onDomainActive}
+	onDismissResult={dismissPanelResult}
+	onDismissAuthTip={dismissAuthTip}
 />
 
