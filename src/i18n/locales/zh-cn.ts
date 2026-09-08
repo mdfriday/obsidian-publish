@@ -522,6 +522,14 @@ export const zhCn = {
 		history_empty: "暂无历史",
 		history_empty_hint: "成功发布后，版本会出现在这里，支持回滚与撤销发布。",
 		history_rollback: "回滚",
+		history_view: "查看",
+		history_unpublish: "撤销发布",
+		history_live: "Live",
+		history_no_url: "还没有公开访问地址。",
+		history_already_live: "该版本已是线上生效版本。",
+		history_rollback_confirm: "回滚到「{{time}}」？当前站点会被该版本覆盖，但仍保持公开。",
+		history_rolling_back: "正在回滚…",
+		history_rollback_done: "已回滚到所选版本。",
 		refresh: "刷新",
 		loading: "加载中",
 
@@ -557,7 +565,7 @@ export const zhCn = {
 		account_manage_sub: "管理订阅",
 		account_personal_price: "$5/月",
 		account_domain_personal_only: "Personal 可用",
-		account_history_personal_only: "历史回滚需 Personal（并绑定自定义域名）",
+		account_history_personal_only: "历史回滚需 Personal",
 		/* legacy keys kept for other call sites */
 		account_guest_title: "访客模式",
 		account_guest_hint: "未认证时，发布的链接需验证后查看",
@@ -607,8 +615,8 @@ export const zhCn = {
 		output_empty_online: "暂无线上分享",
 		output_empty_preview: "暂无本地预览",
 		revoke_share: "撤销分享",
-		revoke_share_confirm: "撤销当前分享？这与「历史」里的回滚不是同一操作。",
-		revoke_share_done: "已清除本地分享链接。若绑定了自定义域名，会一并尝试解绑。",
+		revoke_share_confirm: "撤销发布？访客将看到 404，直到你再次发布。",
+		revoke_share_done: "已撤销发布。公开链接应很快变为 404。",
 
 		// Preview section
 		preview: "本地预览",

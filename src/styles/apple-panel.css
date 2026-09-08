@@ -1571,7 +1571,7 @@
 }
 
 .mdf-apple-panel .apple-history-slot .history-list {
-  max-height: none;
+  max-height: min(52vh, 420px);
   gap: 8px;
 }
 
@@ -1580,19 +1580,54 @@
   border: 1px solid var(--apple-divider);
   border-radius: var(--radius-md);
   padding: 12px;
+  display: block;
 }
 
 .mdf-apple-panel .apple-history-slot .history-item.is-live {
-  border-color: rgba(0, 113, 227, 0.35);
-  box-shadow: 0 0 0 1px rgba(0, 113, 227, 0.12);
+  border-color: rgba(0, 113, 227, 0.28);
+  box-shadow: 0 0 0 1px rgba(0, 113, 227, 0.08);
 }
 
-.mdf-apple-panel .apple-history-slot .live-badge {
+.mdf-apple-panel .apple-history-slot .hi-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.mdf-apple-panel .apple-history-slot .hi-time {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--apple-text);
+  letter-spacing: -0.01em;
+}
+
+.mdf-apple-panel .apple-history-slot .hi-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
   background: rgba(52, 199, 89, 0.12);
   color: #1b7a3a;
-  border-radius: var(--radius-pill);
 }
 
+.mdf-apple-panel .apple-history-slot .hi-meta {
+  font-size: 11px;
+  color: var(--apple-secondary);
+  margin-bottom: 8px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.mdf-apple-panel .apple-history-slot .hi-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mdf-apple-panel .apple-history-slot .hi-btn,
 .mdf-apple-panel .apple-history-slot .url-action-btn,
 .mdf-apple-panel .apple-history-slot .action-button {
   appearance: none;
@@ -1605,11 +1640,32 @@
   border-radius: var(--radius-pill);
   cursor: pointer;
   font-family: inherit;
+  line-height: 1.2;
+  box-shadow: none;
+  min-height: 0;
 }
 
+.mdf-apple-panel .apple-history-slot .hi-btn:hover:not(:disabled),
 .mdf-apple-panel .apple-history-slot .url-action-btn:hover,
 .mdf-apple-panel .apple-history-slot .action-button:hover {
   background: var(--apple-gray-hover);
+}
+
+.mdf-apple-panel .apple-history-slot .hi-btn-danger {
+  background: transparent;
+  color: var(--apple-danger);
+  padding: 6px 8px;
+}
+
+.mdf-apple-panel .apple-history-slot .hi-btn-danger:hover:not(:disabled) {
+  background: rgba(255, 59, 48, 0.06);
+}
+
+.mdf-apple-panel .apple-history-slot .history-empty {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--apple-secondary);
+  font-size: 13px;
 }
 
 .mdf-apple-panel .apple-domain-slot .capability-section {

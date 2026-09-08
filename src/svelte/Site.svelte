@@ -1976,50 +1976,104 @@
 		}
 	}
 
-	/** Take down current share link in UI (≠ History rollback). */
+	/** Take down live site via Control Plane unpublish (share → R2 delete → 404). */
 	async function revokeShare() {
 		const ok = confirm(t('ui.revoke_share_confirm'));
 		if (!ok) return;
 
 		const foundry = plugin.foundryPublishService;
 		const name = plugin.currentProjectName || projectName;
-		if (foundry && name) {
+		if (!foundry || !name) {
+			new Notice(t('ui.revoke_share_done'), 4000);
+			return;
+		}
+
+		try {
+			const bind = await foundry.getCloudflareBinding({
+				workspacePath: plugin.absWorkspacePath,
+				projectName: name,
+			});
+			if (!bind.success || !bind.cloudflareProjectId) {
+				new Notice(
+					plugin.i18n?.t?.('ui.history_no_url') || 'No published project to unpublish.',
+					4000,
+				);
+				return;
+			}
+
+			const mgr = plugin.projectServiceManager;
+			const auth = mgr ? await mgr.resolveAuthToken() : null;
+			const token = auth?.token;
+			if (!token) {
+				new Notice('No MDF Key', 3000);
+				return;
+			}
+
+			const res = await foundry.unpublishProject(token, bind.cloudflareProjectId);
+			if (!res.success) {
+				new Notice(res.error || 'Unpublish failed', 5000);
+				return;
+			}
+
+			// Best-effort: drop custom domain binding so local project returns to share mode.
 			try {
-				const bind = await foundry.getCloudflareBinding({
-					workspacePath: plugin.absWorkspacePath,
-					projectName: name,
-				});
-				if (bind.success && bind.cloudflareProjectId) {
-					const mgr = plugin.projectServiceManager;
-					const auth = mgr ? await mgr.resolveAuthToken() : null;
-					const token = auth?.token;
-					if (token) {
-						const domains = await foundry.listDomains(token, bind.cloudflareProjectId);
-						const list = domains.domains || [];
-						const active = list.find(
-							(d) => d.status === 'active' || d.status === 'pending',
-						);
-						if (active?.id) {
-							await foundry.removeDomain(token, active.id);
-							await foundry.markBindingShare({
-								workspacePath: plugin.absWorkspacePath,
-								projectName: name,
-								publicBaseUrl: plugin.settings.cloudflarePublicBaseUrl,
-							});
-						}
-					}
+				const domains = await foundry.listDomains(token, bind.cloudflareProjectId);
+				const list = domains.domains || [];
+				const active = list.find((d) => d.status === 'active' || d.status === 'pending');
+				if (active?.id) {
+					await foundry.removeDomain(token, active.id);
+					await foundry.markBindingShare({
+						workspacePath: plugin.absWorkspacePath,
+						projectName: name,
+						publicBaseUrl: plugin.settings.cloudflarePublicBaseUrl,
+					});
 				}
 			} catch (error) {
 				console.warn('[Site] revokeShare domain cleanup failed:', error);
 			}
-		}
 
-		publishSuccess = false;
-		publishUrl = '';
-		publishRevoked = true;
-		lastCompletedAction = null;
-		await saveFoundryConfig('params.lastPublishUrl', '');
-		new Notice(t('ui.revoke_share_done'), 4000);
+			publishSuccess = false;
+			publishUrl = '';
+			publishRevoked = true;
+			lastCompletedAction = null;
+			await saveFoundryConfig('params.lastPublishUrl', '');
+			new Notice(t('ui.revoke_share_done'), 4000);
+		} catch (error) {
+			console.error('[Site] revokeShare failed:', error);
+			new Notice((error as Error)?.message || 'Unpublish failed', 5000);
+		}
+	}
+
+	/** After History rollback: clear revoked UI and restore public URL. */
+	async function onHistoryRolledBack() {
+		publishRevoked = false;
+		publishSuccess = true;
+		lastCompletedAction = 'publish';
+		historyRefreshKey += 1;
+
+		const foundry = plugin.foundryPublishService;
+		const name = plugin.currentProjectName || projectName;
+		if (!foundry || !name) return;
+
+		try {
+			const bind = await foundry.getCloudflareBinding({
+				workspacePath: plugin.absWorkspacePath,
+				projectName: name,
+			});
+			if (!bind.success || !bind.cloudflareProjectId) return;
+			const mgr = plugin.projectServiceManager;
+			const auth = mgr ? await mgr.resolveAuthToken() : null;
+			const token = auth?.token;
+			if (!token) return;
+			const listed = await foundry.listReleases(token, bind.cloudflareProjectId);
+			const url = listed.success ? listed.publicUrl : '';
+			if (url) {
+				publishUrl = buildPublishUrl(url);
+				await persistLastPublishUrl(publishUrl);
+			}
+		} catch (error) {
+			console.warn('[Site] onHistoryRolledBack URL refresh failed:', error);
+		}
 	}
 
 	function openPreviewUrl() {
@@ -2081,6 +2135,7 @@
 	onOpenUrl={openPublishUrl}
 	onCopyUrl={copyPublishUrl}
 	onRevokeShare={revokeShare}
+	onRolledBack={onHistoryRolledBack}
 	onOpenPreview={openPreviewUrl}
 	onCopyPreview={copyPreviewUrl}
 	onContinueAuth={continueGuestKeySetup}

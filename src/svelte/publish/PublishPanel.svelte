@@ -55,6 +55,7 @@
 	export let onOpenUrl: () => void;
 	export let onCopyUrl: () => void;
 	export let onRevokeShare: () => void;
+	export let onRolledBack: (() => void | Promise<void>) | undefined = undefined;
 	export let onOpenPreview: () => void;
 	export let onCopyPreview: () => void;
 	export let onContinueAuth: () => void;
@@ -556,7 +557,7 @@
 									<span class="radio" aria-hidden="true"></span>
 								</div>
 							</div>
-							<p class="helper mode-helper warn">{t('ui.mode_folder_helper')}</p>
+							<p class="helper mode-helper">{t('ui.mode_folder_helper')}</p>
 						{/if}
 					</div>
 				</div>
@@ -828,7 +829,15 @@
 				</div>
 			{:else}
 				<div class="apple-history-slot">
-					<HistorySection {plugin} {projectName} refreshKey={historyRefreshKey} layout="tab" />
+					<HistorySection
+						{plugin}
+						{projectName}
+						refreshKey={historyRefreshKey}
+						layout="tab"
+						canRollback={isPersonal}
+						onUnpublish={onRevokeShare}
+						onRolledBack={onRolledBack}
+					/>
 				</div>
 			{/if}
 		</div>

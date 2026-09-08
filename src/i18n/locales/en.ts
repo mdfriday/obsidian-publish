@@ -550,6 +550,15 @@ export const en = {
 		history_empty: "No history yet",
 		history_empty_hint: "Successful publishes appear here for rollback and unpublish.",
 		history_rollback: "Rollback",
+		history_view: "View",
+		history_unpublish: "Unpublish",
+		history_live: "Live",
+		history_no_url: "No public URL for this project yet.",
+		history_already_live: "This release is already live.",
+		history_rollback_confirm:
+			"Roll back to「{{time}}」? The live site will be replaced by this version but stay public.",
+		history_rolling_back: "Rolling back…",
+		history_rollback_done: "Live traffic rolled back.",
 		refresh: "Refresh",
 		loading: "Loading",
 
@@ -585,7 +594,7 @@ export const en = {
 		account_manage_sub: "Manage subscription",
 		account_personal_price: "$5/mo",
 		account_domain_personal_only: "Personal required",
-		account_history_personal_only: "Rollback requires Personal (and a custom domain)",
+		account_history_personal_only: "Rollback requires Personal",
 		/* legacy keys kept for other call sites */
 		account_guest_title: "Guest mode",
 		account_guest_hint: "Unverified publishes require verification to view.",
@@ -636,8 +645,8 @@ export const en = {
 		output_empty_preview: "No local preview yet",
 		revoke_share: "Revoke share",
 		revoke_share_confirm:
-			"Revoke the current share link? This is not the same as rolling back a release in History.",
-		revoke_share_done: "Share cleared locally. Bind a custom domain and remove it to fully unbind hosting.",
+			"Unpublish this site? Visitors will get a 404 until you publish again.",
+		revoke_share_done: "Site unpublished. The public URL should return 404 shortly.",
 
 		// Publish section
 		publish: "Publish",

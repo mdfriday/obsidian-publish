@@ -182,6 +182,7 @@ export default class FridayPlugin extends Plugin {
 
 		// Obsidian official deep link:
 		//   obsidian://mdfriday-publish?event=auth&ok=1
+		//   obsidian://mdfriday-publish?event=claim&status=ok
 		//   obsidian://mdfriday-publish?event=turnstile&token=…
 		this.registerObsidianProtocolHandler('mdfriday-publish', async (params) => {
 			const event = params.event || params.action;
@@ -189,7 +190,11 @@ export default class FridayPlugin extends Plugin {
 				this.resolveTurnstileToken(params.token);
 				return;
 			}
-			if (event === 'auth' && (params.ok === '1' || params.ok === 'true')) {
+			const claimOk =
+				(event === 'auth' && (params.ok === '1' || params.ok === 'true')) ||
+				(event === 'claim' &&
+					(params.status === 'ok' || params.ok === '1' || params.ok === 'true'));
+			if (claimOk) {
 				const mgr = this.projectServiceManager;
 				if (mgr) {
 					const r = await mgr.refreshCloudflareAccount();
