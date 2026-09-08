@@ -198,12 +198,21 @@ export default class FridayPlugin extends Plugin {
 				const mgr = this.projectServiceManager;
 				if (mgr) {
 					const r = await mgr.refreshCloudflareAccount();
+					const planLabel = r.plan || this.settings.mdfKeyPlan || '—';
 					new Notice(
 						r.success
-							? `Signed in (${r.kind}/${r.plan}). Guest sites claimed if any.`
-							: `Account refresh failed: ${r.error}`,
+							? this.i18n?.t?.('ui.claim_refresh_ok')?.replace('{{plan}}', planLabel) ||
+									`Signed in — plan: ${planLabel}`
+							: this.i18n?.t?.('ui.claim_refresh_fail')?.replace('{{error}}', r.error || '') ||
+									`Account refresh failed: ${r.error}`,
 						5000,
 					);
+					this.siteComponent?.onAccountUpdated?.({
+						success: r.success,
+						plan: r.plan,
+						kind: r.kind,
+						source: 'claim',
+					});
 				}
 			}
 		});
@@ -867,7 +876,10 @@ export default class FridayPlugin extends Plugin {
 			}
 		} else {
 			if (publishConfig) {
-				this.siteComponent?.onPublishError?.(result.error || 'Publish failed');
+				this.siteComponent?.onPublishError?.(
+					result.error || 'Publish failed',
+					(result as { code?: string }).code,
+				);
 			} else {
 				this.siteComponent?.onPreviewError?.(result.error);
 			}
@@ -912,7 +924,7 @@ export default class FridayPlugin extends Plugin {
 				this.siteComponent.setSitePath(result.baseURL);
 			}
 		} else {
-			this.siteComponent?.onPublishError?.(result.error || 'Publish failed');
+			this.siteComponent?.onPublishError?.(result.error || 'Publish failed', result.code);
 		}
 	}
 
@@ -938,7 +950,7 @@ export default class FridayPlugin extends Plugin {
 		if (result.success) {
 			this.siteComponent?.onPublishComplete?.(result);
 		} else {
-			this.siteComponent?.onPublishError?.(result.error);
+			this.siteComponent?.onPublishError?.(result.error, result.code);
 		}
 	}
 

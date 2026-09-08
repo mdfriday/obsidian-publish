@@ -374,8 +374,14 @@ export class ProjectServiceManager {
 		if (typeof guest.contentExpiresAt === 'number') {
 			this.plugin.settings.mdfContentExpiresAt = guest.contentExpiresAt;
 		}
+		this.plugin.settings.mdfProjectCount = this.plugin.settings.mdfProjectCount ?? 0;
+		this.plugin.settings.mdfQuotaMaxProjects = this.plugin.settings.mdfQuotaMaxProjects ?? 1;
+		this.plugin.settings.mdfStorageBytes = this.plugin.settings.mdfStorageBytes ?? 0;
+		this.plugin.settings.mdfQuotaStorageBytes =
+			this.plugin.settings.mdfQuotaStorageBytes ?? 5 * 1024 * 1024;
 		await this.plugin.saveSettings();
 		foundry.setKey(key, 'guest');
+		void this.refreshCloudflareAccount();
 		return key;
 	}
 
@@ -504,6 +510,42 @@ export class ProjectServiceManager {
 	}
 
 	/**
+	 * Local quota gate before creating a new remote project.
+	 * Avoids a guaranteed 402 round-trip when the plan is already at max sites.
+	 */
+	async assertCanCreateRemoteProject(): Promise<
+		{ ok: true } | { ok: false; error: string; code: 'quota_exceeded' }
+	> {
+		await this.refreshCloudflareAccount();
+		const used = this.plugin.settings.mdfProjectCount ?? 0;
+		const max = this.plugin.settings.mdfQuotaMaxProjects;
+		const plan = (this.plugin.settings.mdfKeyPlan || 'guest').toLowerCase();
+		const effectiveMax =
+			max === null
+				? null
+				: typeof max === 'number'
+					? max
+					: plan === 'guest'
+						? 1
+						: plan === 'free'
+							? 3
+							: null;
+		if (effectiveMax != null && used >= effectiveMax) {
+			return {
+				ok: false,
+				code: 'quota_exceeded',
+				error:
+					plan === 'guest'
+						? 'Guest allows only 1 site — limit reached. Sign up free to unlock 3 sites.'
+						: plan === 'free'
+							? 'Free allows 3 sites — limit reached. Upgrade to Personal for unlimited sites.'
+							: `Site limit reached (${used}/${effectiveMax}).`,
+			};
+		}
+		return { ok: true };
+	}
+
+	/**
 	 * Bind remote project and persist publish baseURL before build.
 	 * share → https://share…/s/{siteId}/
 	 * custom → `/` (root-relative) + publicUrl https://{hostname}/
@@ -517,7 +559,7 @@ export class ProjectServiceManager {
 				hostingMode: 'share' | 'custom';
 				publicUrl: string;
 		  }
-		| { error: string }
+		| { error: string; code?: string }
 	> {
 		const foundry = this.plugin.foundryPublishService;
 		if (!foundry) {
@@ -532,6 +574,18 @@ export class ProjectServiceManager {
 		const publicBaseUrl =
 			this.plugin.settings.cloudflarePublicBaseUrl || 'https://share.fsky.top';
 
+		// New remote project only — republish of an already-bound site must not be blocked.
+		const existing = await foundry.getCloudflareBinding({
+			workspacePath: this.plugin.absWorkspacePath,
+			projectName,
+		});
+		if (!existing.success || !existing.cloudflareProjectId) {
+			const gate = await this.assertCanCreateRemoteProject();
+			if (!gate.ok) {
+				return { error: gate.error, code: gate.code };
+			}
+		}
+
 		const binding = await foundry.ensureCloudflareBinding({
 			workspacePath: this.plugin.absWorkspacePath,
 			projectName,
@@ -542,7 +596,10 @@ export class ProjectServiceManager {
 		});
 
 		if (!binding.success) {
-			return { error: binding.error || 'Failed to bind Cloudflare project' };
+			return {
+				error: binding.error || 'Failed to bind Cloudflare project',
+				...(binding.code ? { code: binding.code } : {}),
+			};
 		}
 		if (!binding.siteId && binding.hostingMode !== 'custom') {
 			return { error: 'Cloudflare project has no siteId yet' };
@@ -690,7 +747,11 @@ export class ProjectServiceManager {
 
 		const ensured = await this.ensureShareBaseUrl(projectName);
 		if ('error' in ensured) {
-			return { success: false, error: ensured.error };
+			return {
+				success: false,
+				error: ensured.error,
+				...(ensured.code ? { code: ensured.code } : {}),
+			};
 		}
 
 		if (skipBuild) {
@@ -795,7 +856,11 @@ export class ProjectServiceManager {
 		if (useCloudflare) {
 			const ensured = await this.ensureShareBaseUrl(projectName);
 			if ('error' in ensured) {
-				return { success: false, error: ensured.error };
+				return {
+					success: false,
+					error: ensured.error,
+					...(ensured.code ? { code: ensured.code } : {}),
+				};
 			}
 		}
 
@@ -831,6 +896,7 @@ export class ProjectServiceManager {
 						return {
 							success: false,
 							error: publishResult.error || 'Cloudflare publish failed',
+							...(publishResult.code ? { code: publishResult.code } : {}),
 						};
 					}
 
@@ -939,6 +1005,7 @@ export class ProjectServiceManager {
 			return {
 				success: false,
 				error: result.error || result.message || 'Publish failed',
+				...(result.code ? { code: result.code } : {}),
 			};
 		} catch (error) {
 			console.error('[ProjectServiceManager] Error publishing project:', error);
@@ -1007,6 +1074,7 @@ export interface BuildResult {
 export interface PreviewResult {
 	success: boolean;
 	error?: string;
+	code?: string;
 	url?: string;
 	port?: number;
 	path?: string;
@@ -1017,6 +1085,8 @@ export interface PublishResult {
 	success: boolean;
 	error?: string;
 	url?: string;
+	/** Control-plane error code (e.g. quota_exceeded) */
+	code?: string;
 }
 
 export interface ConnectionResult {

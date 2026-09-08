@@ -1039,9 +1039,34 @@
   font-size: 12px;
   color: #8a5a00;
   line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.mdf-apple-panel .upgrade-banner button.link {
+.mdf-apple-panel .upgrade-banner .ub-lead {
+  font-weight: 600;
+  color: #6b4500;
+}
+
+.mdf-apple-panel .upgrade-banner .ub-meta {
+  margin-top: 2px;
+  opacity: 0.92;
+}
+
+.mdf-apple-panel .upgrade-banner .ub-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mdf-apple-panel .upgrade-banner .ub-sep {
+  opacity: 0.5;
+}
+
+.mdf-apple-panel .upgrade-banner button.link,
+.mdf-apple-panel .upgrade-banner a.link {
   color: var(--apple-blue);
   font-weight: 600;
   background: none;
@@ -1050,6 +1075,50 @@
   font-family: inherit;
   font-size: inherit;
   padding: 0;
+  text-decoration: none;
+}
+
+.mdf-apple-panel .upgrade-banner .ub-cta {
+  font-weight: 700;
+}
+
+.mdf-apple-panel .quota-error {
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 59, 48, 0.06);
+  border: 1px solid rgba(255, 59, 48, 0.18);
+}
+
+.mdf-apple-panel .quota-error.is-quota {
+  background: #fff8ee;
+  border-color: rgba(255, 159, 10, 0.28);
+}
+
+.mdf-apple-panel .quota-error .helper.warn {
+  margin: 0 0 10px;
+  color: #8a5a00;
+}
+
+.mdf-apple-panel .quota-error .btn {
+  width: 100%;
+}
+
+.mdf-apple-panel .softgate-benefits {
+  width: 100%;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--apple-secondary, var(--text-muted));
+  text-align: left;
+}
+
+.mdf-apple-panel .softgate-benefits div::before {
+  content: "✓ ";
+  color: #1b7a3a;
+  font-weight: 700;
 }
 
 .mdf-apple-panel .advanced-card {
@@ -1304,28 +1373,6 @@
   border: 1px solid var(--apple-divider) !important;
   padding: 9px 12px !important;
   box-shadow: none !important;
-}
-
-.mdf-apple-panel .upgrade-banner {
-  background: #fff8ee;
-  border: 1px solid rgba(255, 159, 10, 0.25);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  font-size: 12px;
-  color: #8a5a00;
-  line-height: 1.45;
-}
-
-.mdf-apple-panel .upgrade-banner button.link {
-  color: var(--apple-blue);
-  font-weight: 600;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: inherit;
-  padding: 0;
 }
 
 .mdf-apple-panel .state-view {

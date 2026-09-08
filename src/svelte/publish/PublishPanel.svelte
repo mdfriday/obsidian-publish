@@ -30,6 +30,7 @@
 	export let publishProgress: number;
 	export let publishUrl: string;
 	export let publishError: string;
+	export let publishErrorAction: 'claim_free' | 'upgrade_personal' | null = null;
 	export let hasContent: boolean;
 	export let publishRevoked: boolean = false;
 	export let pathRemembered: boolean = false;
@@ -43,6 +44,10 @@
 	export let lastCompletedAction: 'preview' | 'publish' | null = null;
 
 	export let historyRefreshKey: number = 0;
+	/** Bump when account quota snapshot changes (forces banner re-read). */
+	export let quotaRevision: number = 0;
+	/** Bump after claim / account refresh — closes softgate and re-reads plan. */
+	export let accountEpoch: number = 0;
 	export let projectName: string;
 
 	export let onSetMode: (mode: PublishMode) => void;
@@ -56,6 +61,8 @@
 	export let onCopyUrl: () => void;
 	export let onRevokeShare: () => void;
 	export let onRolledBack: (() => void | Promise<void>) | undefined = undefined;
+	/** Called when user opens Account claim in browser — start focus/poll refresh. */
+	export let onClaimStarted: (() => void) | undefined = undefined;
 	export let onOpenPreview: () => void;
 	export let onCopyPreview: () => void;
 	export let onContinueAuth: () => void;
@@ -73,9 +80,9 @@
 	let softgateOpen = false;
 	let passwordOn = false;
 
-	$: kind = (plugin.settings.mdfKeyKind || '').toLowerCase();
-	$: plan = (plugin.settings.mdfKeyPlan || '').toLowerCase();
-	$: hasKey = !!plugin.settings.mdfKey;
+	$: kind = (accountEpoch, quotaRevision, (plugin.settings.mdfKeyKind || '').toLowerCase());
+	$: plan = (accountEpoch, quotaRevision, (plugin.settings.mdfKeyPlan || '').toLowerCase());
+	$: hasKey = !!(accountEpoch, quotaRevision, plugin.settings.mdfKey);
 	$: planTier = (
 		!hasKey || kind === 'guest' || plan === 'guest'
 			? 'guest'
@@ -85,6 +92,14 @@
 	) as PlanTier;
 	$: isPersonal = planTier === 'personal';
 	$: isGuest = planTier === 'guest';
+
+	let prevAccountEpoch = 0;
+	$: if (accountEpoch !== prevAccountEpoch) {
+		prevAccountEpoch = accountEpoch;
+		softgateOpen = false;
+		planOpen = false;
+		activeTab = 'publish';
+	}
 	$: filteredThemes = filterThemesForSelection(themeList, selectionKind);
 	$: showThemes = showThemePicker || (showFolderModeFixed && publishMode === 'themed');
 	$: themeSectionLabel =
@@ -127,12 +142,46 @@
 
 	$: if (sitePassword) passwordOn = true;
 
-	$: bannerText =
+	$: projectUsed = (quotaRevision, plugin.settings.mdfProjectCount);
+	$: projectMax =
+		(quotaRevision,
+		plugin.settings.mdfQuotaMaxProjects ??
+			(planTier === 'guest' ? 1 : planTier === 'free' ? 3 : null));
+	$: storageUsed = (quotaRevision, plugin.settings.mdfStorageBytes);
+	$: storageMax =
+		(quotaRevision,
+		plugin.settings.mdfQuotaStorageBytes ??
+			(planTier === 'guest' ? 5 * 1024 * 1024 : planTier === 'free' ? 50 * 1024 * 1024 : null));
+
+	function formatBytesShort(n: number | null | undefined): string {
+		if (n == null || !Number.isFinite(n)) return '—';
+		if (n < 1024) return `${n} B`;
+		if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+		return `${(n / (1024 * 1024)).toFixed(n >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+	}
+
+	$: projectsLine =
+		projectMax == null
+			? projectUsed != null
+				? t('ui.quota_projects_unlimited').replace('{{used}}', String(projectUsed))
+				: t('ui.quota_projects_unlimited_label')
+			: t('ui.quota_projects')
+					.replace('{{used}}', String(projectUsed ?? 0))
+					.replace('{{max}}', String(projectMax));
+
+	$: storageLine = t('ui.quota_storage')
+		.replace('{{used}}', formatBytesShort(storageUsed ?? 0))
+		.replace('{{max}}', formatBytesShort(storageMax));
+
+	$: bannerPrimary =
 		planTier === 'guest'
-			? t('ui.banner_guest')
+			? t('ui.banner_guest_lead')
 			: planTier === 'free'
-				? t('ui.banner_free')
+				? t('ui.banner_free_lead')
 				: '';
+
+	$: bannerCtaLabel =
+		planTier === 'guest' ? t('ui.plan_cta_claim_sites') : t('ui.plan_cta_upgrade_sites');
 
 	function accountUrlWithKey(extra = '') {
 		const key = plugin.settings.mdfKey;
@@ -150,7 +199,11 @@
 
 	function onDocClick(ev: MouseEvent) {
 		const target = ev.target as HTMLElement | null;
-		if (!target?.closest?.('.plan-popover') && !target?.closest?.('.plan-pill')) {
+		if (
+			!target?.closest?.('.plan-popover') &&
+			!target?.closest?.('.plan-pill') &&
+			!target?.closest?.('.upgrade-banner')
+		) {
 			planOpen = false;
 		}
 	}
@@ -177,7 +230,8 @@
 		softgateOpen = false;
 	}
 
-	function openSoftgate() {
+	function openSoftgate(e?: MouseEvent) {
+		e?.stopPropagation();
 		softgateOpen = true;
 		planOpen = false;
 		activeTab = 'publish';
@@ -187,9 +241,26 @@
 		softgateOpen = false;
 	}
 
-	function openPlans() {
+	function openPlans(e?: MouseEvent) {
+		e?.stopPropagation();
 		softgateOpen = false;
 		planOpen = true;
+	}
+
+	function openClaimAccount(e?: MouseEvent) {
+		e?.stopPropagation();
+		const url = accountUrlWithKey();
+		window.open(url, '_blank', 'noopener');
+		onClaimStarted?.();
+	}
+
+	function onQuotaCta(e?: MouseEvent) {
+		e?.stopPropagation();
+		if (publishErrorAction === 'claim_free' || planTier === 'guest') {
+			openClaimAccount(e);
+			return;
+		}
+		window.open(accountUrlWithKey('upgrade'), '_blank', 'noopener');
 	}
 
 	function toggleAdvanced() {
@@ -301,7 +372,7 @@
 					<div class="pp-price"><span class="muted">{t('ui.plan_guest_price')}</span></div>
 					<ul class="pp-benefits">
 						<li>{t('ui.plan_guest_b1')}</li>
-						<li>{t('ui.plan_guest_b2')}</li>
+						<li>{t('ui.plan_guest_b_projects')}</li>
 						<li>{t('ui.plan_guest_b3')}</li>
 						<li>{t('ui.plan_guest_b4')}</li>
 						<li>{t('ui.plan_guest_b5')}</li>
@@ -328,7 +399,7 @@
 					<div class="pp-price"><span class="muted">{t('ui.plan_free_price')}</span></div>
 					<ul class="pp-benefits">
 						<li>{t('ui.plan_free_b1')}</li>
-						<li>{t('ui.plan_free_b2')}</li>
+						<li>{t('ui.plan_free_b_projects')}</li>
 						<li>{t('ui.plan_free_b3')}</li>
 						<li>{t('ui.plan_free_b4')}</li>
 						<li>{t('ui.plan_free_b5')}</li>
@@ -337,7 +408,7 @@
 					{#if planTier === 'free'}
 						<button type="button" class="pp-cta current-cta" on:click={onOpenAccount}>{t('ui.account_manage')}</button>
 					{:else}
-						<a class="pp-cta" href={accountUrlWithKey()} target="_blank" rel="noopener">{t('ui.plan_signup_free')}</a>
+						<a class="pp-cta" href={accountUrlWithKey()} target="_blank" rel="noopener">{t('ui.plan_cta_claim_sites')}</a>
 					{/if}
 				</div>
 
@@ -350,6 +421,7 @@
 					<div class="pp-price">$5 <span class="muted">{t('ui.plan_per_month')}</span></div>
 					<ul class="pp-benefits">
 						<li>{t('ui.plan_personal_b1')}</li>
+						<li>{t('ui.plan_personal_b_projects')}</li>
 						<li>{t('ui.plan_personal_b2')}</li>
 						<li>{t('ui.plan_personal_b3')}</li>
 						<li>{t('ui.plan_personal_b4')}</li>
@@ -358,7 +430,7 @@
 					{#if planTier === 'personal'}
 						<button type="button" class="pp-cta current-cta" on:click={onOpenAccount}>{t('ui.account_manage_sub')}</button>
 					{:else}
-						<a class="pp-cta" href={accountUrlWithKey('upgrade')} target="_blank" rel="noopener">{t('ui.account_upgrade_personal')}</a>
+						<a class="pp-cta" href={accountUrlWithKey('upgrade')} target="_blank" rel="noopener">{t('ui.plan_cta_upgrade_sites')}</a>
 					{/if}
 				</div>
 
@@ -595,14 +667,26 @@
 					{/if}
 				{/if}
 
-				{#if bannerText}
+				{#if bannerPrimary}
 					<div class="upgrade-banner">
-						{bannerText}
-						<button type="button" class="link" on:click={openPlans}>{t('ui.view_plans')}</button>
-						{#if isGuest}
-							·
-							<button type="button" class="link" on:click={openSoftgate}>{t('ui.plan_signup_free')}</button>
-						{/if}
+						<div class="ub-copy">
+							<div class="ub-lead">{bannerPrimary}</div>
+							<div class="ub-meta">{projectsLine} · {storageLine}</div>
+						</div>
+						<div class="ub-actions">
+							<button type="button" class="link" on:click={openPlans}>{t('ui.view_plans')}</button>
+							<span class="ub-sep" aria-hidden="true">·</span>
+							{#if isGuest}
+								<button type="button" class="link ub-cta" on:click={openClaimAccount}>{bannerCtaLabel}</button>
+							{:else}
+								<a
+									class="link ub-cta"
+									href={accountUrlWithKey('upgrade')}
+									target="_blank"
+									rel="noopener">{bannerCtaLabel}</a
+								>
+							{/if}
+						</div>
 					</div>
 				{/if}
 
@@ -708,7 +792,16 @@
 				</div>
 
 				{#if publishError}
-					<p class="helper warn">{publishError}</p>
+					<div class="quota-error" class:is-quota={!!publishErrorAction}>
+						<p class="helper warn">{publishError}</p>
+						{#if publishErrorAction}
+							<button type="button" class="btn btn-primary btn-pill" on:click={onQuotaCta}>
+								{publishErrorAction === 'claim_free'
+									? t('ui.plan_cta_claim_sites')
+									: t('ui.plan_cta_upgrade_sites')}
+							</button>
+						{/if}
+					</div>
 				{/if}
 			{:else if panelView === 'verify'}
 				<div class="state-view">
@@ -794,8 +887,15 @@
 					<div style="font-size:32px;margin-bottom:12px;">✦</div>
 					<div class="state-title">{t('ui.softgate_title')}</div>
 					<div class="state-desc">{t('ui.softgate_desc')}</div>
+					<div class="softgate-benefits">
+						<div>{t('ui.softgate_b1')}</div>
+						<div>{t('ui.softgate_b2')}</div>
+						<div>{t('ui.softgate_b3')}</div>
+					</div>
 					<div style="width:100%;margin-top:20px;display:flex;flex-direction:column;gap:8px;">
-						<a class="btn btn-primary btn-full" href={accountUrlWithKey()} target="_blank" rel="noopener">{t('ui.plan_signup_free')}</a>
+						<button type="button" class="btn btn-primary btn-full" on:click={openClaimAccount}
+							>{t('ui.plan_cta_claim_sites')}</button
+						>
 						<button type="button" class="btn btn-secondary btn-full" on:click={closeSoftgate}>{t('ui.softgate_later')}</button>
 					</div>
 				</div>

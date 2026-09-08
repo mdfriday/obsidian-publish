@@ -192,6 +192,7 @@ export class ObsidianHttpClient implements PublishHttpClient {
         ...headers,
       },
       body: JSON.stringify(data),
+      throw: false,
     });
 
     return adaptObsidianResponse(response);
@@ -239,6 +240,7 @@ export class ObsidianHttpClient implements PublishHttpClient {
         ...headers,
       },
       body: arrayBufferBody,
+      throw: false,
     });
 
     return adaptObsidianResponse(response);
@@ -492,6 +494,7 @@ export class ObsidianIdentityHttpClient implements IdentityHttpClient {
         ...headers,
       },
       body: JSON.stringify(data),
+      throw: false,
     });
 
     return adaptObsidianIdentityResponse(response);

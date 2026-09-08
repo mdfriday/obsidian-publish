@@ -80,6 +80,12 @@
 	let showAuthTip = false;
 	let outputTab: 'online' | 'preview' = 'online';
 	let historyRefreshKey = 0;
+	/** Bump after account quota refresh so banner re-reads settings. */
+	let quotaRevision = 0;
+	/** Bump after claim / account refresh — closes softgate + refreshes plan pill. */
+	let accountEpoch = 0;
+	let claimPollTimer: ReturnType<typeof setInterval> | null = null;
+	let claimPollUntil = 0;
 	let userChoseMode = false;
 	/** Skip path hydrate once (right-click defaults publish). */
 	let skipPathHydrate = false;
@@ -144,6 +150,8 @@
 	let publishSuccess = false;
 	let publishUrl = '';
 	let publishError = '';
+	/** When set, show upgrade CTA under the error (quota / plan limits). */
+	let publishErrorAction: 'claim_free' | 'upgrade_personal' | null = null;
 	let selectedPublishOption: PublishMethod = normalizePublishMethod();
 
 	/** Pre-auth: show inline before opening Turnstile browser */
@@ -656,20 +664,130 @@
 		if (!skipPathHydrate) {
 			schedulePersistPathConfig();
 		}
+		void refreshQuotaSnapshot();
+	}
+
+	async function refreshQuotaSnapshot() {
+		const mgr = plugin.projectServiceManager;
+		if (!mgr) return;
+		await mgr.refreshCloudflareAccount();
+		quotaRevision += 1;
+		accountEpoch += 1;
+	}
+
+	/** Deep link / claim success — leave softgate and show updated plan. */
+	export function onAccountUpdated(_info?: {
+		success?: boolean;
+		plan?: string;
+		kind?: string;
+		source?: string;
+	}) {
+		stopClaimPoll();
+		publishError = '';
+		publishErrorAction = null;
+		quotaRevision += 1;
+		accountEpoch += 1;
+	}
+
+	function stopClaimPoll() {
+		if (claimPollTimer) {
+			clearInterval(claimPollTimer);
+			claimPollTimer = null;
+		}
+		claimPollUntil = 0;
+	}
+
+	/** After opening Account in browser, poll until plan leaves guest (or timeout). */
+	export function startClaimPoll() {
+		stopClaimPoll();
+		claimPollUntil = Date.now() + 3 * 60_000;
+		claimPollTimer = setInterval(() => {
+			void (async () => {
+				if (Date.now() > claimPollUntil) {
+					stopClaimPoll();
+					return;
+				}
+				const mgr = plugin.projectServiceManager;
+				if (!mgr) return;
+				const r = await mgr.refreshCloudflareAccount();
+				if (!r.success) return;
+				const plan = (plugin.settings.mdfKeyPlan || '').toLowerCase();
+				const kind = (plugin.settings.mdfKeyKind || '').toLowerCase();
+				if (kind === 'user' || (plan && plan !== 'guest')) {
+					stopClaimPoll();
+					publishError = '';
+					publishErrorAction = null;
+					quotaRevision += 1;
+					accountEpoch += 1;
+					new Notice(
+						plugin.i18n?.t?.('ui.claim_refresh_ok')?.replace('{{plan}}', plan || r.plan || 'free') ||
+							`Signed in — plan: ${plan || r.plan}`,
+						4000,
+					);
+				} else {
+					quotaRevision += 1;
+				}
+			})();
+		}, 2500);
+	}
+
+	function onFocusMaybeRefreshClaim() {
+		if (!claimPollTimer) return;
+		void plugin.projectServiceManager?.refreshCloudflareAccount().then((r) => {
+			if (!r?.success) return;
+			const plan = (plugin.settings.mdfKeyPlan || '').toLowerCase();
+			const kind = (plugin.settings.mdfKeyKind || '').toLowerCase();
+			if (kind === 'user' || (plan && plan !== 'guest')) {
+				onAccountUpdated({ success: true, plan, kind, source: 'focus' });
+			} else {
+				quotaRevision += 1;
+			}
+		});
 	}
 
 	/**
 	 * Publish error callback
 	 */
-	export function onPublishError(error: string) {
+	export function onPublishError(error: string, code?: string) {
 		publishProgress = 0;
 		isPublishing = false;
 		isBuilding = false;
 		isPreviewBuilding = false;
 		publishSuccess = false;
-		publishError = error || t('ui.publish_failed');
-		console.error('[Site] Publish error:', error);
-		new Notice(publishError, 5000);
+
+		const planLower = (plugin.settings.mdfKeyPlan || plugin.settings.mdfKeyKind || 'guest')
+			.toLowerCase();
+		const raw = error || t('ui.publish_failed');
+		const isQuota =
+			code === 'quota_exceeded' ||
+			/project limit|quota exceeded|storage quota|limit reached|allows only|allows \d+ sites|status 402|HTTP 402/i.test(
+				raw,
+			);
+		const isStorage = /storage/i.test(raw);
+
+		if (isQuota) {
+			if (planLower === 'guest' || planLower === '' || !plugin.settings.mdfKeyPlan) {
+				publishError = isStorage
+					? t('ui.err_quota_storage_guest')
+					: t('ui.err_quota_projects_guest');
+				publishErrorAction = 'claim_free';
+			} else if (planLower === 'free') {
+				publishError = isStorage
+					? t('ui.err_quota_storage_free')
+					: t('ui.err_quota_projects_free');
+				publishErrorAction = 'upgrade_personal';
+			} else {
+				publishError = isStorage ? t('ui.err_quota_storage_personal') : raw;
+				publishErrorAction = null;
+			}
+		} else {
+			publishError = raw;
+			publishErrorAction = null;
+		}
+
+		console.error('[Site] Publish error:', error, code);
+		new Notice(publishError, 7000);
+		void refreshQuotaSnapshot();
 	}
 
 	/**
@@ -716,6 +834,7 @@
 				onPreviewStopped,
 				onPublishComplete,
 			onPublishError,
+			onAccountUpdated,
 			onConnectionTestSuccess,
 			onConnectionTestError,
 			
@@ -731,6 +850,13 @@
 		}
 
 		await loadThemeList();
+
+		// Sync plan badge from API (cached settings may be stale / wrong after claim).
+		if (plugin.settings.mdfKey) {
+			void refreshQuotaSnapshot();
+		}
+
+		window.addEventListener('focus', onFocusMaybeRefreshClaim);
 
 		// Keep sidebar selection in sync with the active markdown note.
 		const syncActiveNote = (file: TFile | null) => {
@@ -978,7 +1104,9 @@
 			clearTimeout(pathConfigSaveTimeout);
 			pathConfigSaveTimeout = null;
 		}
-		
+		stopClaimPoll();
+		window.removeEventListener('focus', onFocusMaybeRefreshClaim);
+
 		// Clean up server
 		if (serverRunning) {
 			stopPreview();
@@ -1319,6 +1447,7 @@
 		publishProgress = 0;
 		publishSuccess = false;
 		publishError = '';
+		publishErrorAction = null;
 		lastCompletedAction = null;
 		publishRevoked = false;
 	}
@@ -2114,6 +2243,7 @@
 	{publishProgress}
 	{publishUrl}
 	{publishError}
+	publishErrorAction={publishErrorAction}
 	hasContent={currentContents.length > 0}
 	{publishRevoked}
 	{pathRemembered}
@@ -2124,6 +2254,8 @@
 	{previewWasStopped}
 	{lastCompletedAction}
 	{historyRefreshKey}
+	quotaRevision={quotaRevision}
+	accountEpoch={accountEpoch}
 	projectName={plugin.currentProjectName || projectName}
 	onSetMode={setPublishMode}
 	onSelectTheme={applyThemeBySlug}
@@ -2136,6 +2268,7 @@
 	onCopyUrl={copyPublishUrl}
 	onRevokeShare={revokeShare}
 	onRolledBack={onHistoryRolledBack}
+	onClaimStarted={startClaimPoll}
 	onOpenPreview={openPreviewUrl}
 	onCopyPreview={copyPreviewUrl}
 	onContinueAuth={continueGuestKeySetup}
