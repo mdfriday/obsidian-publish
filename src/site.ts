@@ -216,10 +216,27 @@ export class Site {
 
 	/**
 	 * 清空所有内容
+	 * @param silent — skip toast (used when following active note)
 	 */
-	clearAllContent() {
+	clearAllContent(silent = false) {
 		this.languageContents.set([]);
-		new Notice(this.plugin.i18n.t('messages.all_content_cleared'), 3000);
+		if (!silent) {
+			new Notice(this.plugin.i18n.t('messages.all_content_cleared'), 3000);
+		}
+	}
+
+	/**
+	 * Replace selection with a single file or folder (follow / open target).
+	 */
+	replaceSelection(folder: TFolder | null, file: TFile | null, languageCode = 'en') {
+		const content: LanguageContent = {
+			id: this.generateRandomId(),
+			folder,
+			file,
+			languageCode,
+			weight: 1,
+		};
+		this.languageContents.set([content]);
 	}
 
 	/**

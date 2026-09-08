@@ -30,6 +30,7 @@
 		savePathPublishConfig,
 		selectionVaultPath,
 	} from "../services/path-config";
+	import { normalizeVaultPath, pathsEqual } from "../services/project-path";
 
 	// Receive props
 	export let app: App;
@@ -84,6 +85,8 @@
 	let quotaRevision = 0;
 	/** Bump after claim / account refresh — closes softgate + refreshes plan pill. */
 	let accountEpoch = 0;
+	/** Bump when published-target list should reload (publish / rename / open). */
+	let targetListRevision = 0;
 	let claimPollTimer: ReturnType<typeof setInterval> | null = null;
 	let claimPollUntil = 0;
 	let userChoseMode = false;
@@ -352,9 +355,30 @@
 
 	/**
 	 * Initialize component with project state
-	 * Called by Main.ts after project creation or when loading existing project
+	 * Called by Main.ts after project creation or when loading existing project.
+	 * @param epoch — selectionEpoch from openOrFollowSelection; stale calls are ignored.
 	 */
-	export async function initialize(state: ProjectState) {
+	export async function initialize(state: ProjectState, epoch?: number) {
+		const stillCurrent = () =>
+			epoch === undefined || epoch === plugin.selectionEpoch;
+		if (!stillCurrent()) return;
+
+		// Drop previous target's publish/preview/theme residue before loading the new project.
+		resetProjectUiState({ keepSelection: true });
+		if (!stillCurrent()) return;
+
+		// Bind selection to this project (prevents stale apply from keeping another file selected).
+		if (state.folder || state.file) {
+			site.replaceSelection(state.folder ?? null, state.file ?? null);
+		}
+
+		const statePath = state.file?.path || state.folder?.path || null;
+		const currentPath = selectionVaultPath(site.getCurrentContents());
+		if (statePath && currentPath && statePath !== currentPath) {
+			// Selection drifted — do not paint this project's publish status onto another file.
+			return;
+		}
+
 		projectName = state.name;
 		absPreviewDir = state.path;
 
@@ -370,6 +394,7 @@
 
 			// 2. Load theme configuration
 			const matchedTheme = await resolveThemeFromConfig(state.config);
+			if (!stillCurrent()) return;
 			if (matchedTheme) {
 				selectedThemeSlug = matchedTheme.slug;
 				selectedThemeName = matchedTheme.name;
@@ -408,22 +433,24 @@
 		if (state.config.params?.autoPublish !== undefined) {
 			autoPublishEnabled = state.config.params.autoPublish;
 		}
-		if (state.config.params?.lastPublishUrl) {
-			publishUrl = state.config.params.lastPublishUrl;
-			publishSuccess = true;
-			outputTab = 'online';
-		}
 
 			// 5. Load language configuration
 			if (state.config.languages && state.config.defaultContentLanguage) {
-				// Apply language configuration (with initializing flag to prevent saves)
 				await applyLanguageConfiguration(
 					state.config.languages,
 					state.config.defaultContentLanguage,
-					true // isInitializing = true
+					true
 				);
 			}
 		}
+
+		if (!stillCurrent()) return;
+
+		// Publish status is path-scoped (remote sourcePath) — never trust another
+		// project's leftover params.lastPublishUrl.
+		await refreshPublishStatusForVaultPath(statePath || currentPath, epoch);
+
+		if (!stillCurrent()) return;
 
 		// Path-scoped mode wins over Foundry theme leftovers (note → faithful by default).
 		if (activeVaultPath) {
@@ -431,12 +458,73 @@
 			await hydrateFromPathConfig(activeVaultPath);
 		}
 
-		// Notify Main.ts that initialization is complete
+		if (!stillCurrent()) return;
+
+		historyRefreshKey += 1;
+		targetListRevision += 1;
+
 		if (plugin.handleSiteEvent) {
 			await plugin.handleSiteEvent('initialized', {
 				projectName: state.name
 			});
 		}
+	}
+
+	/**
+	 * Clear publish/preview/config UI that belongs to the previous target.
+	 * Call before loading another project or soft-following an unpublished file.
+	 */
+	function resetProjectUiState(opts?: { keepSelection?: boolean }) {
+		try {
+			stopAllLocalPreviewServers();
+		} catch {
+			/* ignore */
+		}
+
+		isBuilding = false;
+		isPreviewBuilding = false;
+		buildProgress = 0;
+		previewUrl = '';
+		previewId = '';
+		hasPreview = false;
+		previewWasStopped = false;
+		lastCompletedAction = null;
+		absPreviewDir = '';
+
+		isPublishing = false;
+		publishProgress = 0;
+		publishSuccess = false;
+		publishUrl = '';
+		publishError = '';
+		publishErrorAction = null;
+		publishRevoked = false;
+
+		authPrepareStep = 'idle';
+		showAuthTip = false;
+
+		sitePassword = '';
+		autoPublishEnabled = false;
+		googleAnalyticsId = '';
+		disqusShortname = '';
+		sitePath = '';
+		if (!opts?.keepSelection) {
+			siteName = '';
+			projectName = '';
+		}
+
+		userHasSelectedTheme = false;
+		userChoseMode = false;
+		currentThemeWithSample = null;
+		selectedThemeSlug = '';
+		selectedThemeName = '';
+		selectedThemeDownloadUrl = '';
+
+		lastHydratedPath = null;
+		lastSavedLanguageConfig = '';
+		isSavingLanguageConfig = false;
+
+		historyRefreshKey += 1;
+		targetListRevision += 1;
 	}
 
 	/**
@@ -661,6 +749,7 @@
 			void plugin.saveSettings();
 			new Notice(t('messages.site_published_successfully'), 5000);
 		}
+		targetListRevision += 1;
 		if (!skipPathHydrate) {
 			schedulePersistPathConfig();
 		}
@@ -844,6 +933,8 @@
 			startPublish,
 			applyDefaultsAndPublish,
 			clearAllContent,
+			followSelection,
+			notifyTargetsChanged,
 			openAccountFromGrowth,
 			enableAutoPublish
 		});
@@ -858,7 +949,7 @@
 
 		window.addEventListener('focus', onFocusMaybeRefreshClaim);
 
-		// Keep sidebar selection in sync with the active markdown note.
+		// Keep sidebar selection in sync with the active markdown note (soft follow).
 		const syncActiveNote = (file: TFile | null) => {
 			if (!file || file.extension !== 'md') return;
 			if (skipPathHydrate || isPublishing || isPreviewBuilding || plugin.isProjectInitializing) {
@@ -867,7 +958,7 @@
 			if (!plugin.isViewOpen?.()) return;
 			const currentPath = selectionVaultPath(currentContents);
 			if (currentPath === file.path) return;
-			void plugin.openPublishPanel(null, file);
+			void plugin.openOrFollowSelection(null, file, { createIfMissing: false });
 		};
 
 		plugin.registerEvent(
@@ -1333,8 +1424,134 @@
 		site.removeLanguageContent(contentId);
 	}
 	
-	function clearAllContent() {
-		site.clearAllContent();
+	function clearAllContent(silent = false) {
+		site.clearAllContent(silent);
+	}
+
+	/**
+	 * Resolve「已发布」strictly by vault path against remote projects.source_path.
+	 * Local Foundry params.lastPublishUrl is only a cache and can be polluted across
+	 * projects — never use it as the sole source of truth when switching targets.
+	 */
+	async function refreshPublishStatusForVaultPath(
+		vaultPath: string | null | undefined,
+		epoch?: number,
+	) {
+		const stillCurrent = () =>
+			epoch === undefined || epoch === plugin.selectionEpoch;
+
+		publishUrl = '';
+		publishSuccess = false;
+		publishRevoked = false;
+		lastCompletedAction = null;
+
+		const path = normalizeVaultPath(vaultPath);
+		if (!path) return;
+
+		const mgr = plugin.projectServiceManager;
+		if (!mgr || !plugin.settings.mdfKey) {
+			return;
+		}
+
+		try {
+			const res = await mgr.listRemoteCloudflareProjects();
+			if (!stillCurrent()) return;
+			if (!res.success || !res.projects?.length) {
+				// No remote match → scrub stale local cache for the open project
+				if (plugin.currentProjectName) {
+					void saveFoundryConfig('params.lastPublishUrl', '');
+				}
+				return;
+			}
+
+			const match = res.projects.find(
+				(p) =>
+					pathsEqual(p.sourcePath, path) &&
+					p.status !== 'deleted' &&
+					p.status !== 'draft',
+			);
+
+			if (!match) {
+				if (plugin.currentProjectName) {
+					void saveFoundryConfig('params.lastPublishUrl', '');
+				}
+				return;
+			}
+
+			if (match.status === 'unpublished') {
+				publishRevoked = true;
+				publishSuccess = false;
+				publishUrl = '';
+				if (plugin.currentProjectName) {
+					void saveFoundryConfig('params.lastPublishUrl', '');
+				}
+				return;
+			}
+
+			// status === 'published' (or equivalent live)
+			let url = '';
+			if (typeof match.publicUrl === 'string' && match.publicUrl) {
+				url = buildPublishUrl(match.publicUrl);
+			} else if (match.domainHostname && match.domainStatus === 'active') {
+				url = `https://${match.domainHostname.replace(/\/$/, '')}/`;
+			} else if (match.siteId) {
+				const publicBase =
+					plugin.settings.cloudflarePublicBaseUrl || 'https://share.fsky.top';
+				url = `${publicBase.replace(/\/$/, '')}/s/${match.siteId}/index.html`;
+			}
+
+			if (!stillCurrent()) return;
+
+			if (url && match.status === 'published') {
+				publishUrl = url;
+				publishSuccess = true;
+				publishRevoked = false;
+				outputTab = 'online';
+				if (plugin.currentProjectName) {
+					void persistLastPublishUrl(url);
+				}
+			} else {
+				publishUrl = '';
+				publishSuccess = false;
+			}
+		} catch (err) {
+			console.warn('[Site] refreshPublishStatusForVaultPath failed', err);
+			if (!stillCurrent()) return;
+			publishUrl = '';
+			publishSuccess = false;
+		}
+	}
+
+	/** Soft-follow: swap selection UI without creating a Foundry project. */
+	function followSelection(folder: TFolder | null, file: TFile | null) {
+		resetProjectUiState();
+		plugin.currentProjectName = null;
+		site.replaceSelection(folder, file);
+		publishUrl = '';
+		publishSuccess = false;
+		publishRevoked = false;
+		lastCompletedAction = null;
+		projectName = '';
+		const path = folder?.path || file?.path || null;
+		void refreshPublishStatusForVaultPath(path, plugin.selectionEpoch);
+	}
+
+	function notifyTargetsChanged() {
+		targetListRevision += 1;
+		historyRefreshKey += 1;
+	}
+
+	async function selectPublishedTarget(sourcePath: string) {
+		const abstract = app.vault.getAbstractFileByPath(sourcePath);
+		if (!abstract) {
+			new Notice(t('messages.content_path_missing') || 'Path not found in vault', 3000);
+			return;
+		}
+		if (abstract instanceof TFolder) {
+			await plugin.openOrFollowSelection(abstract, null, { createIfMissing: true });
+		} else if (abstract instanceof TFile && abstract.extension === 'md') {
+			await plugin.openOrFollowSelection(null, abstract, { createIfMissing: true });
+		}
 	}
 	
 	function clearSiteAssets() {
@@ -1464,6 +1681,14 @@
 		if (currentContents.length === 0) {
 			new Notice(t('messages.no_folder_or_file_selected'), 3000);
 			return;
+		}
+
+		if (!plugin.currentProjectName) {
+			const ok = await plugin.ensureProjectForSelection();
+			if (!ok) {
+				new Notice(t('messages.no_folder_or_file_selected'), 3000);
+				return;
+			}
 		}
 
 		const firstContent = currentContents[0];
@@ -1807,8 +2032,11 @@
 		}
 
 		if (!plugin.currentProjectName) {
-			new Notice('No project selected. Please right-click a folder first.', 3000);
-			return;
+			const ok = await plugin.ensureProjectForSelection();
+			if (!ok) {
+				new Notice(t('messages.no_folder_or_file_selected'), 3000);
+				return;
+			}
 		}
 
 		if (!plugin.settings.mdfKey) {
@@ -2256,6 +2484,8 @@
 	{historyRefreshKey}
 	quotaRevision={quotaRevision}
 	accountEpoch={accountEpoch}
+	targetListRevision={targetListRevision}
+	activeVaultPath={activeVaultPath}
 	projectName={plugin.currentProjectName || projectName}
 	onSetMode={setPublishMode}
 	onSelectTheme={applyThemeBySlug}
@@ -2276,5 +2506,6 @@
 	onDomainActive={onDomainActive}
 	onDismissResult={dismissPanelResult}
 	onDismissAuthTip={dismissAuthTip}
+	onSelectTarget={selectPublishedTarget}
 />
 

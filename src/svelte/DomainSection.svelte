@@ -74,6 +74,29 @@
 		if (layout === 'embedded' && projectName) void refresh();
 	});
 
+	let prevDomainProject = '';
+	$: if (projectName !== prevDomainProject) {
+		prevDomainProject = projectName;
+		if (projectName) {
+			void refresh();
+		} else {
+			remoteProjectId = null;
+			activeHostname = null;
+			domainId = null;
+			hostnameInput = '';
+			domainStatus = '';
+			certStatus = '';
+			sslStatus = '';
+			txtName = '';
+			txtValue = '';
+			cnameTarget = '';
+			sslTxts = [];
+			dcvCnames = [];
+			step = 'idle';
+			statusMsg = '';
+		}
+	}
+
 	async function toggle() {
 		if (layout === 'embedded') return;
 		expanded = !expanded;

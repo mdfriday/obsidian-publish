@@ -599,6 +599,8 @@ export const en = {
 		mode_folder_hint: "Quartz / Obsidian Publish–style digital garden · graph · multi-page",
 		badge_note: "Note",
 		badge_wiki: "Wiki",
+		target_menu_empty: "No published targets in this vault yet",
+		target_menu_unpublished: "Current file is not published — it won’t appear in the list until you publish",
 		password_hint_note: "A password is required to view this note. It is not written into the note.",
 		password_hint_site: "A password is required to view this site. It is not written into notes.",
 		theme_live_demo: "Live demo",
@@ -704,6 +706,7 @@ export const en = {
 	},
 
 	menu: {
+		open_in_mdfriday: "Open in MDFriday",
 		publish_to_web: "Publish to MDFriday",
 		add_to_publish_list: "Add to Publish List",
 		set_as_site_assets: "Set as Site Assets",

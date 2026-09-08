@@ -50,10 +50,18 @@
 	$: {
 		const nameChanged = projectName !== prevProjectName;
 		const keyChanged = refreshKey !== prevRefreshKey;
-		if (projectName && (nameChanged || keyChanged)) {
+		if (nameChanged || keyChanged) {
 			prevProjectName = projectName;
 			prevRefreshKey = refreshKey;
-			void refresh();
+			if (projectName) {
+				void refresh();
+			} else {
+				remoteProjectId = null;
+				liveReleaseId = null;
+				publicUrl = '';
+				releases = [];
+				statusMsg = '';
+			}
 		}
 	}
 

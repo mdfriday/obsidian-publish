@@ -567,7 +567,9 @@ export const zhCn = {
 		mode_folder_helper: "文件夹默认且仅支持 Wiki 发布。可选皮肤变体见下方。",
 		mode_folder_hint: "Quartz / Obsidian Publish 风格数字花园 · 图谱 · 多页",
 		badge_note: "单篇",
-		badge_wiki: "Wiki",
+		badge_wiki: "全站",
+		target_menu_empty: "本库还没有已发布的对象",
+		target_menu_unpublished: "当前文件尚未发布，发布后才会出现在列表中",
 		password_hint_note: "访问这篇笔记需要密码；密码不会写入笔记。",
 		password_hint_site: "访问整个站点需要密码；密码不会写入笔记。",
 		theme_live_demo: "Live demo",
@@ -688,6 +690,7 @@ export const zhCn = {
 	},
 
 	menu: {
+		open_in_mdfriday: "在 MDFriday 中打开",
 		publish_to_web: "发布到 MDFriday",
 		add_to_publish_list: "添加到发布列表",
 		set_as_site_assets: "设为站点资源",

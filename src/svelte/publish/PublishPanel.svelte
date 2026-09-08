@@ -2,6 +2,7 @@
 	import type FridayPlugin from '../../main';
 	import type { PublishMode, SelectionKind } from '../../types/publish-config';
 	import type { CatalogEntry } from '../../theme/types';
+	import { TFile, TFolder } from 'obsidian';
 	import DomainSection from '../DomainSection.svelte';
 	import HistorySection from '../HistorySection.svelte';
 	import { filterThemesForSelection } from '../../utils/theme';
@@ -48,6 +49,10 @@
 	export let quotaRevision: number = 0;
 	/** Bump after claim / account refresh — closes softgate and re-reads plan. */
 	export let accountEpoch: number = 0;
+	/** Bump to reload published-target dropdown. */
+	export let targetListRevision: number = 0;
+	/** Current vault path for matching dropdown checkmark. */
+	export let activeVaultPath: string | null = null;
 	export let projectName: string;
 
 	export let onSetMode: (mode: PublishMode) => void;
@@ -70,15 +75,27 @@
 	export let onDomainActive: (hostname: string) => void;
 	export let onDismissResult: () => void;
 	export let onDismissAuthTip: () => void = () => {};
+	export let onSelectTarget: ((sourcePath: string) => void | Promise<void>) | undefined = undefined;
 
 	type PanelTab = 'publish' | 'history';
 	type PlanTier = 'guest' | 'free' | 'personal';
+
+	type TargetOption = {
+		id: string;
+		sourcePath: string;
+		label: string;
+		kind: 'note' | 'folder';
+		status?: string;
+	};
 
 	let activeTab: PanelTab = 'publish';
 	let planOpen = false;
 	let advancedOpen = false;
 	let softgateOpen = false;
 	let passwordOn = false;
+	let targetMenuOpen = false;
+	let targetOptions: TargetOption[] = [];
+	let targetsLoading = false;
 
 	$: kind = (accountEpoch, quotaRevision, (plugin.settings.mdfKeyKind || '').toLowerCase());
 	$: plan = (accountEpoch, quotaRevision, (plugin.settings.mdfKeyPlan || '').toLowerCase());
@@ -206,18 +223,83 @@
 		) {
 			planOpen = false;
 		}
+		if (!target?.closest?.('.target-switcher')) {
+			targetMenuOpen = false;
+		}
 	}
 
 	function onKey(ev: KeyboardEvent) {
 		if (ev.key === 'Escape') {
 			planOpen = false;
 			softgateOpen = false;
+			targetMenuOpen = false;
 		}
+	}
+
+	async function loadTargetOptions() {
+		const mgr = plugin.projectServiceManager;
+		if (!mgr || !plugin.settings.mdfKey) {
+			targetOptions = [];
+			return;
+		}
+		targetsLoading = true;
+		try {
+			const res = await mgr.listRemoteCloudflareProjects();
+			const vault = plugin.app.vault;
+			const next: TargetOption[] = [];
+			for (const p of res.projects || []) {
+				const sourcePath =
+					typeof p.sourcePath === 'string' && p.sourcePath.trim()
+						? p.sourcePath.replace(/\\/g, '/')
+						: null;
+				if (!sourcePath) continue;
+				const abs = vault.getAbstractFileByPath(sourcePath);
+				if (!abs) continue;
+				const kind: 'note' | 'folder' =
+					abs instanceof TFolder || p.kind === 'folder' ? 'folder' : 'note';
+				if (kind === 'note' && !(abs instanceof TFile && abs.extension === 'md')) continue;
+				const label = abs instanceof TFile ? abs.basename : abs.name;
+				next.push({
+					id: p.id,
+					sourcePath,
+					label,
+					kind,
+					...(typeof p.status === 'string' ? { status: p.status } : {}),
+				});
+			}
+			targetOptions = next;
+		} catch (err) {
+			console.warn('[PublishPanel] loadTargetOptions failed', err);
+			targetOptions = [];
+		} finally {
+			targetsLoading = false;
+		}
+	}
+
+	$: targetListRevision, accountEpoch, void loadTargetOptions();
+
+	$: selectedTargetMatched = targetOptions.some(
+		(o) => activeVaultPath && o.sourcePath === activeVaultPath,
+	);
+
+	function toggleTargetMenu(e?: MouseEvent) {
+		e?.stopPropagation();
+		targetMenuOpen = !targetMenuOpen;
+		if (targetMenuOpen) {
+			void loadTargetOptions();
+		}
+	}
+
+	async function pickTarget(opt: TargetOption) {
+		targetMenuOpen = false;
+		if (activeVaultPath && opt.sourcePath === activeVaultPath) return;
+		await onSelectTarget?.(opt.sourcePath);
 	}
 
 	onMount(() => {
 		document.addEventListener('click', onDocClick);
 		document.addEventListener('keydown', onKey);
+		void loadTargetOptions();
 	});
 	onDestroy(() => {
 		document.removeEventListener('click', onDocClick);
@@ -507,8 +589,22 @@
 				{/if}
 
 				<div class="section-label">{t('ui.target_label')}</div>
-				<div class="card">
-					<div class="target-card">
+				<div class="card target-switcher">
+					<div
+						class="target-card"
+						class:open={targetMenuOpen}
+						role="button"
+						tabindex="0"
+						aria-expanded={targetMenuOpen}
+						aria-haspopup="listbox"
+						on:click={toggleTargetMenu}
+						on:keydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								toggleTargetMenu(e as unknown as MouseEvent);
+							}
+						}}
+					>
 						<div class="target-icon" aria-hidden="true">
 							{#if selectionKind === 'folder'}
 								<svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -532,13 +628,92 @@
 							{/if}
 						</div>
 						<div class="target-info">
-							<div class="target-name">{fileName || t('ui.no_content_selected_hint')}</div>
-							<div class="target-path">{pathLabel || fileName || ''}</div>
+							<div class="target-name" title={pathLabel || fileName || ''}>
+								{fileName || t('ui.no_content_selected_hint')}
+							</div>
 						</div>
 						<span class="target-kind-tag">
 							{selectionKind === 'folder' ? t('ui.badge_wiki') : t('ui.badge_note')}
 						</span>
+						<span class="target-chevron" aria-hidden="true">
+							<svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+								<path
+									d="M3 4.5L6 7.5L9 4.5"
+									stroke="currentColor"
+									stroke-width="1.5"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								/>
+							</svg>
+						</span>
 					</div>
+					{#if targetMenuOpen}
+						<div class="target-menu" role="listbox">
+							{#if targetsLoading}
+								<div class="target-menu-empty">{t('ui.loading') || '…'}</div>
+							{:else if targetOptions.length === 0}
+								<div class="target-menu-empty">{t('ui.target_menu_empty')}</div>
+							{:else}
+								{#each targetOptions as opt (opt.id)}
+									<div
+										class="target-menu-item"
+										class:active={activeVaultPath === opt.sourcePath}
+										role="option"
+										tabindex="0"
+										aria-selected={activeVaultPath === opt.sourcePath}
+										on:click={() => pickTarget(opt)}
+										on:keydown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												e.preventDefault();
+												void pickTarget(opt);
+											}
+										}}
+									>
+										<span class="target-menu-icon" aria-hidden="true">
+											{#if opt.kind === 'folder'}
+												<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+													<path
+														d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9Z"
+														fill="#AEAEB2"
+													/>
+												</svg>
+											{:else}
+												<svg width="14" height="16" viewBox="0 0 16 18" fill="none">
+													<path
+														d="M2.5 1.5h7.2L13.5 5.3V16a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"
+														fill="#fff"
+														stroke="#C7C7CC"
+														stroke-width="1"
+													/>
+												</svg>
+											{/if}
+										</span>
+										<span class="target-menu-label">
+											{opt.label}
+											<span class="target-menu-sep">·</span>
+											{opt.kind === 'folder' ? t('ui.badge_wiki') : t('ui.badge_note')}
+										</span>
+										{#if activeVaultPath === opt.sourcePath}
+											<span class="target-menu-check" aria-hidden="true">
+												<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+													<path
+														d="M3 7.2L5.8 10L11 4"
+														stroke="var(--interactive-accent, #5B7CFA)"
+														stroke-width="1.8"
+														stroke-linecap="round"
+														stroke-linejoin="round"
+													/>
+												</svg>
+											</span>
+										{/if}
+									</div>
+								{/each}
+							{/if}
+							{#if !selectedTargetMatched && fileName}
+								<div class="target-menu-hint">{t('ui.target_menu_unpublished')}</div>
+							{/if}
+						</div>
+					{/if}
 				</div>
 
 				<div class="section-label">{t('ui.publish_method')}</div>

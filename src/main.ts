@@ -17,6 +17,14 @@ import {LicenseServiceManager} from './services/license';
 import {DomainServiceManager} from './services/domain';
 import {LicenseStateManager} from './services/licenseState';
 import {ProjectServiceManager} from './services/project';
+import {
+	deletePathConfigKey,
+	migratePathConfigsOnRename,
+	normalizeVaultPath,
+	pathsEqual,
+	projectPrimaryVaultPath,
+	remapPathAfterRename,
+} from './services/project-path';
 import type {ProjectState, SiteEventData, SiteEventType} from './types/events';
 import {normalizePublishMethod} from './types/publish';
 import {resolveDefaultTheme, shouldUseInternalRenderer} from './utils/theme';
@@ -151,6 +159,11 @@ export default class FridayPlugin extends Plugin {
 	licenseState?: LicenseStateManager | null
 	// Current project name for tracking
 	currentProjectName?: string | null
+	/**
+	 * Bumped on every openOrFollowSelection so stale async applies
+	 * (previous file) cannot overwrite the newer target's UI state.
+	 */
+	selectionEpoch: number = 0
 	
 	// Site.svelte component reference (for new event-driven architecture)
 	siteComponent?: any | null
@@ -362,7 +375,7 @@ export default class FridayPlugin extends Plugin {
 		});
 		
 		// Register context menu for files and folders (PC-only):
-		// single entry — Publish to MDFriday (auto build + publish).
+		// Open in MDFriday (config) + Publish to MDFriday (auto publish).
 		this.registerEvent(
 			this.app.workspace.on('file-menu', (menu, file) => {
 				if (file instanceof TFolder) {
@@ -371,6 +384,18 @@ export default class FridayPlugin extends Plugin {
 					this.addPublishMenuItems(menu, file);
 				}
 			})
+		);
+
+		// Keep pathConfigs / remote source_path in sync when vault paths change.
+		this.registerEvent(
+			this.app.vault.on('rename', (file, oldPath) => {
+				void this.onVaultPathRenamed(file, oldPath);
+			}),
+		);
+		this.registerEvent(
+			this.app.vault.on('delete', (file) => {
+				void this.onVaultPathDeleted(file.path);
+			}),
 		);
 
 		this.addCommand({
@@ -397,31 +422,28 @@ export default class FridayPlugin extends Plugin {
 	}
 
 	/**
-	 * Helper method to add "Add to Publish List" menu item for file or folder
+	 * Open sidebar for file/folder without publishing (config + load existing project).
 	 */
-	private addToPublishListMenuItem(menu: Menu, fileOrFolder: TFile | TFolder) {
+	private addOpenInMdfridayMenuItem(menu: Menu, fileOrFolder: TFile | TFolder) {
 		menu.addItem(item => {
 			item
-				.setTitle(this.i18n.t('menu.add_to_publish_list'))
+				.setTitle(this.i18n.t('menu.open_in_mdfriday'))
 				.setIcon(FRIDAY_ICON)
 				.onClick(async () => {
-					if (this.siteComponent?.clearAllContent) {
-						this.siteComponent.clearAllContent();
-					}
-
 					if (fileOrFolder instanceof TFile) {
-						await this.openPublishPanel(null, fileOrFolder);
+						await this.openOrFollowSelection(null, fileOrFolder, { createIfMissing: true });
 					} else {
-						await this.openPublishPanel(fileOrFolder, null);
+						await this.openOrFollowSelection(fileOrFolder, null, { createIfMissing: true });
 					}
 				});
 		});
 	}
 
 	/**
-	 * Single publish entry in file/folder menus: open panel + auto publish.
+	 * File/folder menus: Open in MDFriday + Publish to MDFriday.
 	 */
 	private addPublishMenuItems(menu: Menu, fileOrFolder: TFile | TFolder) {
+		this.addOpenInMdfridayMenuItem(menu, fileOrFolder);
 		menu.addItem(item => {
 			item
 				.setTitle(this.i18n.t('menu.publish_to_web'))
@@ -660,6 +682,20 @@ export default class FridayPlugin extends Plugin {
 }
 
 	async openPublishPanel(folder: TFolder | null, file: TFile | null) {
+		await this.openOrFollowSelection(folder, file, { createIfMissing: true });
+	}
+
+	/**
+	 * Open or soft-follow a vault selection in the publish sidebar.
+	 * createIfMissing=false (file-open): update UI only; load existing project if path matches.
+	 * createIfMissing=true (menu / publish): create local Foundry project when needed.
+	 */
+	async openOrFollowSelection(
+		folder: TFolder | null,
+		file: TFile | null,
+		opts: { createIfMissing: boolean },
+	) {
+		const epoch = ++this.selectionEpoch;
 		const rightSplit = this.app.workspace.rightSplit;
 		if (!rightSplit) {
 			return;
@@ -668,38 +704,122 @@ export default class FridayPlugin extends Plugin {
 			rightSplit.expand();
 		}
 
-		// Get project name from folder/file
+		const vaultPath = normalizeVaultPath(folder?.path ?? file?.path ?? null);
+		if (!vaultPath) {
+			console.warn('Unable to determine vault path');
+			return;
+		}
+
+		const existingByPath = await this.findLocalProjectByVaultPath(vaultPath);
+		if (epoch !== this.selectionEpoch) return;
+
+		if (existingByPath) {
+			this.site.clearAllContent(true);
+			await this.applyFoundryProjectToPanel(existingByPath, folder, file, epoch);
+			if (epoch !== this.selectionEpoch) return;
+			await this.activateView();
+			this.siteComponent?.notifyTargetsChanged?.();
+			return;
+		}
+
+		if (!opts.createIfMissing) {
+			this.currentProjectName = null;
+			if (this.siteComponent?.followSelection) {
+				this.siteComponent.followSelection(folder, file);
+			} else {
+				this.site.clearAllContent(true);
+				this.site.replaceSelection(folder, file);
+			}
+			await this.activateView();
+			this.siteComponent?.notifyTargetsChanged?.();
+			return;
+		}
+
 		const projectName = this.getProjectNameFromSelection(folder, file);
 		if (!projectName) {
 			console.warn('Unable to determine project name');
 			return;
 		}
 
-		// Check if project already exists
+		// Fallback: same basename project (legacy) when path not indexed yet
 		const existingProject = await this.getFoundryProject(projectName);
-		
+		if (epoch !== this.selectionEpoch) return;
+
 		if (existingProject) {
-			// Project exists, load its configuration and apply to panel
-			await this.applyFoundryProjectToPanel(existingProject, folder, file);
+			const primary = projectPrimaryVaultPath(this, existingProject);
+			if (primary && !pathsEqual(primary, vaultPath)) {
+				// Basename collision with a different path — create a distinct project name
+				const uniqueName = this.uniqueProjectNameForPath(vaultPath, projectName);
+				const created = await this.createFoundryProject(uniqueName, folder, file);
+				if (epoch !== this.selectionEpoch) return;
+				if (created) {
+					const newProject = await this.getFoundryProject(uniqueName);
+					if (epoch !== this.selectionEpoch) return;
+					if (newProject) {
+						this.isProjectInitializing = true;
+						this.site.clearAllContent(true);
+						await this.applyFoundryProjectToPanel(newProject, folder, file, epoch);
+						this.isProjectInitializing = false;
+					}
+				}
+			} else {
+				this.site.clearAllContent(true);
+				await this.applyFoundryProjectToPanel(existingProject, folder, file, epoch);
+			}
 		} else {
-			// Project doesn't exist, create it first
 			const created = await this.createFoundryProject(projectName, folder, file);
-			
+			if (epoch !== this.selectionEpoch) return;
 			if (created) {
-				// After creation, get the project and apply to panel (same flow as existing project)
 				const newProject = await this.getFoundryProject(projectName);
+				if (epoch !== this.selectionEpoch) return;
 				if (newProject) {
-					this.isProjectInitializing = true; // Set flag to prevent auto-saving during initialization
-					await this.applyFoundryProjectToPanel(newProject, folder, file);
-					this.isProjectInitializing = false; // Reset flag after initialization
+					this.isProjectInitializing = true;
+					this.site.clearAllContent(true);
+					await this.applyFoundryProjectToPanel(newProject, folder, file, epoch);
+					this.isProjectInitializing = false;
 				} else {
 					console.error('[Friday] Failed to retrieve newly created project');
 				}
 			}
 		}
 
-		// Open or reveal the publish panel using unified method
+		if (epoch !== this.selectionEpoch) return;
 		await this.activateView();
+		this.siteComponent?.notifyTargetsChanged?.();
+	}
+
+	/**
+	 * Ensure a local Foundry project exists for the current sidebar selection (preview/publish).
+	 */
+	async ensureProjectForSelection(): Promise<boolean> {
+		if (this.currentProjectName) return true;
+		const contents = this.site.getCurrentContents();
+		const first = contents[0];
+		if (!first) return false;
+		await this.openOrFollowSelection(first.folder, first.file, { createIfMissing: true });
+		return !!this.currentProjectName;
+	}
+
+	private uniqueProjectNameForPath(vaultPath: string, baseName: string): string {
+		const safe = vaultPath.replace(/[\\/]/g, '__').replace(/\.md$/i, '');
+		return safe.length > 0 ? safe : baseName;
+	}
+
+	private async findLocalProjectByVaultPath(vaultPath: string): Promise<ObsidianProjectInfo | null> {
+		if (!this.foundryProjectService || !this.absWorkspacePath) return null;
+		try {
+			const result = await this.foundryProjectService.listProjects(this.absWorkspacePath);
+			if (!result.success || !result.data) return null;
+			for (const project of result.data) {
+				const primary = projectPrimaryVaultPath(this, project);
+				if (pathsEqual(primary, vaultPath)) {
+					return project;
+				}
+			}
+		} catch (error) {
+			console.error('[Friday] Error listing projects for path match:', error);
+		}
+		return null;
 	}
 
 	/**
@@ -707,10 +827,8 @@ export default class FridayPlugin extends Plugin {
 	 */
 	private getProjectNameFromSelection(folder: TFolder | null, file: TFile | null): string | null {
 		if (folder) {
-			// Use folder name as project name
 			return folder.name;
 		} else if (file) {
-			// Use file name (without extension) as project name
 			return file.basename;
 		}
 		return null;
@@ -1178,33 +1296,43 @@ export default class FridayPlugin extends Plugin {
 	 * Apply existing Foundry project configuration to panel
 	 * Uses new architecture: Main.ts as Controller, Site.svelte as View
 	 */
-	private async applyFoundryProjectToPanel(project: ObsidianProjectInfo, folder: TFolder | null, file: TFile | null) {
+	private async applyFoundryProjectToPanel(
+		project: ObsidianProjectInfo,
+		folder: TFolder | null,
+		file: TFile | null,
+		epoch?: number,
+	) {
 		if (!this.foundryProjectConfigService) {
 			return;
 		}
+		const stillCurrent = () => epoch === undefined || epoch === this.selectionEpoch;
 
 		try {
+			if (!stillCurrent()) return;
+
 			// Step 1: Set current project name FIRST before any operations
 			this.currentProjectName = project.name;
-			
-			// Step 2: Load content based on project type
+
+			// Step 2: Load content based on project type (clear first so links can re-init)
+			this.site.clearAllContent(true);
 			await this.loadExistingProjectContent(project);
-			
+			if (!stillCurrent()) return;
+
 			// First open (no publish yet): still seed content from the selection so
 			// local preview works without requiring a prior publish.
-			const hasContent = this.site.hasContent();
-			if (!hasContent && (folder || file)) {
-				this.site.initializeContent(folder, file);
+			if (!this.site.hasContent() && (folder || file)) {
+				this.site.replaceSelection(folder, file);
 			}
-			
+
 			// Step 3: Get complete project configuration from Foundry
 			if (!this.projectServiceManager) {
 				console.error('[Friday] ProjectServiceManager not available');
 				return;
 			}
-			
+
 			const config = await this.projectServiceManager.getConfig(project.name);
-			
+			if (!stillCurrent()) return;
+
 			// Step 4: Prepare complete ProjectState
 			const projectState: ProjectState = {
 				name: project.name,
@@ -1212,16 +1340,17 @@ export default class FridayPlugin extends Plugin {
 				folder,
 				file,
 				config,
-				status: 'active'
+				status: 'active',
 			};
-			
+
 			// Step 5: Call Site.svelte's initialize method (NEW ARCHITECTURE)
 			if (this.siteComponent?.initialize) {
-				await this.siteComponent.initialize(projectState);
+				await this.siteComponent.initialize(projectState, epoch);
 			} else {
 				console.error('[Friday] Site component not registered - cannot apply configuration');
 			}
 		} catch (error) {
+			if (!stillCurrent()) return;
 			console.error('[Friday] Error applying project to panel:', error);
 			// Fallback: at least initialize content
 			this.site.initializeContent(folder, file);
@@ -1526,6 +1655,76 @@ export default class FridayPlugin extends Plugin {
 		}
 
 		await this.publishToWeb(file);
+	}
+
+	private async onVaultPathRenamed(file: TAbstractFile, oldPath: string) {
+		const newPath = file.path;
+		const configsChanged = migratePathConfigsOnRename(this, oldPath, newPath);
+		if (configsChanged) {
+			await this.saveSettings();
+		}
+
+		// Soft-update sidebar selection if it was pointing at the renamed path
+		const contents = this.site?.getCurrentContents?.() ?? [];
+		const current = contents[0];
+		const currentPath = current?.folder?.path ?? current?.file?.path;
+		if (currentPath && (pathsEqual(currentPath, oldPath) || normalizeVaultPath(currentPath)?.startsWith(normalizeVaultPath(oldPath)! + '/'))) {
+			if (file instanceof TFile && file.extension === 'md') {
+				this.site.replaceSelection(null, file);
+			} else if (file instanceof TFolder) {
+				this.site.replaceSelection(file, null);
+			}
+		}
+
+		const matched = await this.findLocalProjectByVaultPath(oldPath);
+		// Also match projects whose path is under a renamed folder
+		let projectsToRemap: ObsidianProjectInfo[] = matched ? [matched] : [];
+		if (!matched && this.foundryProjectService && this.absWorkspacePath) {
+			try {
+				const listed = await this.foundryProjectService.listProjects(this.absWorkspacePath);
+				const oldN = normalizeVaultPath(oldPath)!;
+				projectsToRemap = (listed.data || []).filter((p) => {
+					const primary = projectPrimaryVaultPath(this, p);
+					return primary === oldN || (primary?.startsWith(oldN + '/') ?? false);
+				});
+			} catch {
+				/* ignore */
+			}
+		}
+
+		for (const project of projectsToRemap) {
+			if (!this.foundryProjectService || !this.absWorkspacePath) break;
+			const beforePrimary = projectPrimaryVaultPath(this, project);
+			const remapped = await this.foundryProjectService.remapProjectSourcePaths(
+				this.absWorkspacePath,
+				project.name,
+				(stored) => remapPathAfterRename(stored, oldPath, newPath, this),
+			);
+			const cfId = remapped.data?.cloudflareProjectId;
+			if (cfId && this.settings.mdfKey && this.foundryPublishService) {
+				const nextPrimary = beforePrimary
+					? normalizeVaultPath(
+							remapPathAfterRename(beforePrimary, oldPath, newPath, this),
+						)
+					: normalizeVaultPath(newPath);
+				if (nextPrimary) {
+					await this.foundryPublishService.updateRemoteProject(
+						this.settings.mdfKey,
+						cfId,
+						{ sourcePath: nextPrimary },
+					);
+				}
+			}
+		}
+
+		this.siteComponent?.notifyTargetsChanged?.();
+	}
+
+	private async onVaultPathDeleted(vaultPath: string) {
+		if (deletePathConfigKey(this, vaultPath)) {
+			await this.saveSettings();
+		}
+		this.siteComponent?.notifyTargetsChanged?.();
 	}
 
 

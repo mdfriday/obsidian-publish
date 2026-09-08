@@ -384,6 +384,8 @@ export interface TranslationNamespace {
 		mode_folder_hint: string;
 		badge_note: string;
 		badge_wiki: string;
+		target_menu_empty: string;
+		target_menu_unpublished: string;
 		password_hint_note: string;
 		password_hint_site: string;
 		theme_live_demo: string;
@@ -479,6 +481,7 @@ export interface TranslationNamespace {
 
 	// Menu and actions
 	menu: {
+		open_in_mdfriday: string;
 		publish_to_web: string;
 		set_as_site_assets: string;
 		quick_share: string;

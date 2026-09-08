@@ -586,6 +586,7 @@ export class ProjectServiceManager {
 			}
 		}
 
+		const identity = this.publishIdentityFromSelection();
 		const binding = await foundry.ensureCloudflareBinding({
 			workspacePath: this.plugin.absWorkspacePath,
 			projectName,
@@ -593,6 +594,9 @@ export class ProjectServiceManager {
 			hostingMode: 'share',
 			apiBaseUrl: this.plugin.settings.cloudflareApiBaseUrl,
 			publicBaseUrl,
+			...(identity.sourcePath ? { sourcePath: identity.sourcePath } : {}),
+			...(identity.kind ? { kind: identity.kind } : {}),
+			...(identity.title ? { title: identity.title } : {}),
 		});
 
 		if (!binding.success) {
@@ -667,6 +671,8 @@ export class ProjectServiceManager {
 			domainHostname?: string;
 			domainStatus?: string;
 			domainCertStatus?: string;
+			sourcePath?: string | null;
+			publicUrl?: string;
 		}>;
 		error?: string;
 	}> {
@@ -706,6 +712,8 @@ export class ProjectServiceManager {
 				const domainCertStatus = (p.domainCertStatus ?? p.domain_cert_status) as
 					| string
 					| undefined;
+				const sourcePath = (p.sourcePath ?? p.source_path) as string | null | undefined;
+				const publicUrl = (p.publicUrl ?? p.public_url) as string | undefined;
 				return {
 					id: String(p.id || ''),
 					...(siteId ? { siteId } : {}),
@@ -719,6 +727,8 @@ export class ProjectServiceManager {
 					...(domainHostname ? { domainHostname } : {}),
 					...(domainStatus ? { domainStatus } : {}),
 					...(domainCertStatus ? { domainCertStatus } : {}),
+					...(sourcePath !== undefined ? { sourcePath: sourcePath as string | null } : {}),
+					...(typeof publicUrl === 'string' ? { publicUrl } : {}),
 				};
 			});
 			return { success: true, projects };
@@ -780,6 +790,7 @@ export class ProjectServiceManager {
 			method: 'cloudflare',
 			hostingMode: ensured.hostingMode,
 			onProgress: (progress) => onProgress?.(progress),
+			...this.publishIdentityFromSelection(),
 		});
 
 		if (!publishResult.success) {
@@ -882,6 +893,7 @@ export class ProjectServiceManager {
 					const publishResult = await this.publish(projectName, {
 						method: 'cloudflare',
 						config: publishConfig?.config,
+						...this.publishIdentityFromSelection(),
 						onProgress: (progress) => {
 							onProgress?.({
 								phase: 'publishing',
@@ -965,6 +977,9 @@ export class ProjectServiceManager {
 			method?: string;
 			config?: unknown;
 			hostingMode?: 'share' | 'custom';
+			sourcePath?: string;
+			kind?: 'note' | 'folder';
+			title?: string;
 			onProgress?: (progress: PublishProgressUpdate) => void;
 		}
 	): Promise<PublishResult> {
@@ -994,6 +1009,9 @@ export class ProjectServiceManager {
 					hostingMode: options.hostingMode ?? 'share',
 					// Custom: empty release prefix needs full tree until server copyFrom exists
 					force: options.hostingMode === 'custom',
+					...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
+					...(options.kind ? { kind: options.kind } : {}),
+					...(options.title ? { title: options.title } : {}),
 				},
 				onProgress as unknown as Parameters<typeof foundry.publishCloudflare>[1],
 			);
@@ -1014,6 +1032,32 @@ export class ProjectServiceManager {
 				error: (error as Error).message,
 			};
 		}
+	}
+
+	/** Vault path + kind for remote project identity (source_path). */
+	private publishIdentityFromSelection(): {
+		sourcePath?: string;
+		kind?: 'note' | 'folder';
+		title?: string;
+	} {
+		const contents = this.plugin.site?.getCurrentContents?.() ?? [];
+		const first = contents[0];
+		if (!first) return {};
+		if (first.folder) {
+			return {
+				sourcePath: first.folder.path,
+				kind: 'folder',
+				title: first.folder.name,
+			};
+		}
+		if (first.file) {
+			return {
+				sourcePath: first.file.path,
+				kind: 'note',
+				title: first.file.basename,
+			};
+		}
+		return {};
 	}
 
 	/**
