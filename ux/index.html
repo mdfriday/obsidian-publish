@@ -475,15 +475,53 @@
     .theme-row.selected .theme-check {
       background: var(--apple-blue); border-color: var(--apple-blue); color: #fff;
     }
-    .advanced-toggle {
-      display: flex; align-items: center; justify-content: space-between; width: 100%;
-      appearance: none; border: none; background: transparent; padding: 10px 0 4px;
-      cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; color: var(--apple-text);
+    .advanced-card {
+      margin: 4px 0 12px;
+      background: var(--apple-white);
+      border: 1px solid var(--apple-divider);
+      border-radius: var(--radius-md);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+      overflow: hidden;
+      transition: border-color 0.15s, box-shadow 0.15s;
     }
-    .advanced-toggle .chev { transition: transform 0.2s var(--ease); color: var(--apple-secondary); font-size: 11px; }
-    .advanced-toggle.open .chev { transform: rotate(180deg); }
-    .advanced-body { display: none; padding-top: 8px; }
+    .advanced-card.open {
+      border-color: rgba(0,113,227,0.28);
+      box-shadow: 0 0 0 1px rgba(0,113,227,0.08), 0 1px 2px rgba(0,0,0,0.03);
+    }
+    .advanced-toggle {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+      appearance: none; cursor: pointer; font-family: inherit;
+      margin: 0; padding: 12px 14px;
+      background: transparent; border: none; border-radius: 0;
+      box-shadow: none;
+      transition: background 0.15s;
+    }
+    .advanced-toggle:hover { background: #F8F8FA; }
+    .advanced-card.open .advanced-toggle { background: #F7FBFF; }
+    .advanced-toggle .adv-label {
+      font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--apple-text);
+    }
+    .advanced-toggle .adv-hint {
+      display: block; margin-top: 2px; font-size: 11px; font-weight: 500; color: var(--apple-secondary);
+    }
+    .advanced-toggle .chev {
+      width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--apple-gray-fill); color: var(--apple-text);
+      transition: transform 0.2s var(--ease), background 0.15s, color 0.15s;
+    }
+    .advanced-toggle .chev svg { width: 14px; height: 14px; display: block; }
+    .advanced-card.open .advanced-toggle .chev {
+      transform: rotate(180deg); background: rgba(0,113,227,0.12); color: var(--apple-blue);
+    }
+    .advanced-body {
+      display: none;
+      padding: 14px 14px 16px;
+      border-top: 1px solid var(--apple-divider);
+      background: var(--apple-white);
+    }
     .advanced-body.open { display: block; }
+    .advanced-body .field-group:last-child { margin-bottom: 0; }
     .field-label {
       font-size: 12px; font-weight: 500; color: var(--apple-text); margin-bottom: 6px;
       display: flex; align-items: center; gap: 6px;
@@ -890,25 +928,33 @@
 
           <div class="upgrade-banner" id="upgradeBanner"></div>
 
-          <button class="advanced-toggle" id="advancedToggle">
-            高级选项 <span class="chev">▾</span>
-          </button>
-          <div class="advanced-body" id="advancedBody">
-            <div class="field-group">
-              <div class="toggle-row">
-                <span class="field-label" style="margin:0;">访问密码</span>
-                <button class="toggle" id="pwdToggle" aria-label="启用密码"></button>
+          <div class="advanced-card" id="advancedCard">
+            <button class="advanced-toggle" id="advancedToggle" type="button" aria-expanded="false">
+              <span class="adv-text">
+                <span class="adv-label">高级选项</span>
+                <span class="adv-hint">密码、自定义域名</span>
+              </span>
+              <span class="chev" aria-hidden="true">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
+              </span>
+            </button>
+            <div class="advanced-body" id="advancedBody">
+              <div class="field-group">
+                <div class="toggle-row">
+                  <span class="field-label" style="margin:0;">访问密码</span>
+                  <button class="toggle" id="pwdToggle" aria-label="启用密码"></button>
+                </div>
+                <input class="field-input" id="pwdInput" type="password" placeholder="留空则公开访问" disabled />
+                <p class="helper" id="pwdHelper">访客需输入密码才能查看</p>
               </div>
-              <input class="field-input" id="pwdInput" type="password" placeholder="留空则公开访问" disabled />
-              <p class="helper" id="pwdHelper">访客需输入密码才能查看</p>
-            </div>
-            <div class="field-group">
-              <div class="field-label">
-                自定义域名
-                <span class="domain-status" id="domainStatus">未绑定</span>
+              <div class="field-group">
+                <div class="field-label">
+                  自定义域名
+                  <span class="domain-status" id="domainStatus">未绑定</span>
+                </div>
+                <input class="field-input" id="domainInput" type="text" placeholder="notes.example.com" />
+                <p class="helper" id="domainHelper">绑定后通过你的域名访问已发布站点</p>
               </div>
-              <input class="field-input" id="domainInput" type="text" placeholder="notes.example.com" />
-              <p class="helper" id="domainHelper">绑定后通过你的域名访问已发布站点</p>
             </div>
           </div>
         </div>
@@ -1353,7 +1399,10 @@
   function renderAdvanced() {
     const toggle = $('#advancedToggle');
     const body = $('#advancedBody');
+    const card = $('#advancedCard');
     toggle.classList.toggle('open', state.advancedOpen);
+    toggle.setAttribute('aria-expanded', state.advancedOpen ? 'true' : 'false');
+    if (card) card.classList.toggle('open', state.advancedOpen);
     body.classList.toggle('open', state.advancedOpen);
     const pwdOk = canUsePassword();
     const pwdToggle = $('#pwdToggle');

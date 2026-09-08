@@ -470,50 +470,93 @@
 
 				<div class="section-label">{t('ui.publish_method')}</div>
 				<div class="card card-modes">
-					<div class="mode-seg">
+					<div class="mode-seg" role="radiogroup" aria-label={t('ui.publish_method')}>
 						{#if showModeSwitch}
-							<button
-								type="button"
+							<!-- Use div (not button) so Obsidian global button chrome cannot pill/reshape these options -->
+							<div
 								class="mode-option"
 								class:active={publishMode === 'faithful'}
+								role="radio"
+								aria-checked={publishMode === 'faithful'}
+								tabindex="0"
 								on:click={() => onSetMode('faithful')}
+								on:keydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										onSetMode('faithful');
+									}
+								}}
 							>
-								<div class="mode-head">
-									<div class="mode-title">{t('ui.mode_faithful')}</div>
-									<span class="radio" aria-hidden="true"></span>
-								</div>
-								<div class="mode-desc">{t('ui.mode_faithful_hint')}</div>
-							</button>
-							<button
-								type="button"
-								class="mode-option"
-								class:active={publishMode === 'themed'}
-								on:click={() => onSetMode('themed')}
-							>
-								<div class="mode-head">
-									<div class="mode-title">{t('ui.mode_themed_note')}</div>
-									<span class="radio" aria-hidden="true"></span>
-								</div>
-								<div class="mode-desc">{t('ui.mode_themed_hint')}</div>
-							</button>
-						{:else if showFolderModeFixed}
-							<button type="button" class="mode-option" disabled>
-								<div class="mode-head">
-									<div class="mode-title">
-										{t('ui.mode_faithful')}
-										<span class="disabled-tag">{t('ui.mode_unavailable')}</span>
+								<div class="mode-row">
+									<div class="mode-copy">
+										<div class="mode-title">{t('ui.mode_faithful')}</div>
+										<div class="mode-desc">{t('ui.mode_faithful_hint')}</div>
 									</div>
 									<span class="radio" aria-hidden="true"></span>
 								</div>
-								<div class="mode-desc">{t('ui.mode_folder_faithful_disabled')}</div>
-							</button>
-							<button type="button" class="mode-option active" on:click={() => onSetMode('themed')}>
-								<div class="mode-head">
-									<div class="mode-title">{t('ui.mode_wiki')}</div>
+							</div>
+							<div
+								class="mode-option"
+								class:active={publishMode === 'themed'}
+								role="radio"
+								aria-checked={publishMode === 'themed'}
+								tabindex="0"
+								on:click={() => onSetMode('themed')}
+								on:keydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										onSetMode('themed');
+									}
+								}}
+							>
+								<div class="mode-row">
+									<div class="mode-copy">
+										<div class="mode-title">{t('ui.mode_themed_note')}</div>
+										<div class="mode-desc">{t('ui.mode_themed_hint')}</div>
+									</div>
 									<span class="radio" aria-hidden="true"></span>
 								</div>
-								<div class="mode-desc">{t('ui.mode_folder_hint')}</div>
-							</button>
+							</div>
+							<p class="helper mode-helper">
+								{publishMode === 'faithful'
+									? t('ui.mode_faithful_helper')
+									: t('ui.mode_themed_helper')}
+							</p>
+						{:else if showFolderModeFixed}
+							<div class="mode-option is-disabled" aria-disabled="true">
+								<div class="mode-row">
+									<div class="mode-copy">
+										<div class="mode-title">
+											{t('ui.mode_faithful')}
+											<span class="disabled-tag">{t('ui.mode_unavailable')}</span>
+										</div>
+										<div class="mode-desc">{t('ui.mode_folder_faithful_disabled')}</div>
+									</div>
+									<span class="radio" aria-hidden="true"></span>
+								</div>
+							</div>
+							<div
+								class="mode-option active"
+								role="radio"
+								aria-checked="true"
+								tabindex="0"
+								on:click={() => onSetMode('themed')}
+								on:keydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										onSetMode('themed');
+									}
+								}}
+							>
+								<div class="mode-row">
+									<div class="mode-copy">
+										<div class="mode-title">{t('ui.mode_wiki')}</div>
+										<div class="mode-desc">{t('ui.mode_folder_hint')}</div>
+									</div>
+									<span class="radio" aria-hidden="true"></span>
+								</div>
+							</div>
+							<p class="helper mode-helper warn">{t('ui.mode_folder_helper')}</p>
 						{/if}
 					</div>
 				</div>
@@ -562,53 +605,105 @@
 					</div>
 				{/if}
 
-				<button
-					type="button"
-					class="advanced-toggle"
-					class:open={advancedOpen}
-					on:click={toggleAdvanced}
-				>
-					{t('ui.advanced_options')} <span class="chev">▾</span>
-				</button>
-				<div class="advanced-body" class:open={advancedOpen}>
-					<div class="field-group">
-						<div class="toggle-row">
-							<span class="field-label" style="margin:0;">{t('ui.access_password')}</span>
-							<button
-								type="button"
-								class="toggle"
-								class:on={passwordOn}
-								disabled={!isPersonal}
-								aria-label={t('ui.access_password')}
-								on:click={togglePassword}
-							></button>
-						</div>
-						<input
-							class="field-input"
-							type="password"
-							placeholder={t('ui.site_password_placeholder')}
-							value={sitePassword}
-							disabled={!isPersonal || !passwordOn}
-							on:input={onPwdInput}
-						/>
-						{#if isPersonal}
-							<p class="helper">{t('ui.password_helper')}</p>
-						{:else}
-							<p class="helper lock">{t('ui.password_personal_only')}</p>
-						{/if}
+				<div class="advanced-card" class:open={advancedOpen}>
+					<!-- div avoids Obsidian global button chrome (pill radius / min-height) -->
+					<div
+						class="advanced-toggle"
+						role="button"
+						tabindex="0"
+						aria-expanded={advancedOpen}
+						on:click={toggleAdvanced}
+						on:keydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								toggleAdvanced();
+							}
+						}}
+					>
+						<span class="adv-text">
+							<span class="adv-label">{t('ui.advanced_options')}</span>
+							<span class="adv-hint">{t('ui.advanced_options_hint')}</span>
+						</span>
+						<span class="chev" aria-hidden="true">
+							<svg
+								viewBox="0 0 16 16"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2.2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							>
+								<path d="M4 6l4 4 4-4" />
+							</svg>
+						</span>
 					</div>
-
-					<div class="field-group">
-						<div class="field-label">{t('ui.custom_domain')}</div>
-						{#if isPersonal}
-							<div class="apple-domain-slot">
-								<DomainSection {plugin} {projectName} onDomainActive={onDomainActive} />
+					{#if advancedOpen}
+						<div class="advanced-body">
+							<div class="field-group">
+								<div class="toggle-row">
+									<span class="field-label" style="margin:0;">{t('ui.access_password')}</span>
+									<div
+										class="toggle"
+										class:on={passwordOn && isPersonal}
+										class:is-disabled={!isPersonal}
+										role="switch"
+										aria-checked={passwordOn && isPersonal}
+										aria-disabled={!isPersonal}
+										tabindex={isPersonal ? 0 : -1}
+										aria-label={t('ui.access_password')}
+										on:click={togglePassword}
+										on:keydown={(e) => {
+											if (!isPersonal) return;
+											if (e.key === 'Enter' || e.key === ' ') {
+												e.preventDefault();
+												togglePassword();
+											}
+										}}
+									></div>
+								</div>
+								<input
+									class="field-input"
+									type="password"
+									placeholder={t('ui.site_password_placeholder')}
+									value={sitePassword}
+									disabled={!isPersonal || !passwordOn}
+									on:input={onPwdInput}
+								/>
+								{#if isPersonal}
+									<p class="helper">{t('ui.password_helper')}</p>
+								{:else}
+									<p class="helper lock">{t('ui.password_personal_only')}</p>
+								{/if}
 							</div>
-						{:else}
-							<input class="field-input" type="text" placeholder="notes.example.com" disabled />
-							<p class="helper lock">{t('ui.domain_personal_only')}</p>
-						{/if}
-					</div>
+
+							<div class="field-group">
+								<div class="field-label">
+									{t('ui.custom_domain')}
+									{#if !isPersonal}
+										<span class="domain-status">{t('ui.domain_unbound')}</span>
+									{/if}
+								</div>
+								{#if isPersonal}
+									<div class="apple-domain-slot">
+										<DomainSection
+											{plugin}
+											{projectName}
+											onDomainActive={onDomainActive}
+											layout="embedded"
+										/>
+									</div>
+								{:else}
+									<input
+										class="field-input"
+										type="text"
+										placeholder="notes.example.com"
+										disabled
+									/>
+									<p class="helper lock">{t('ui.domain_personal_only')}</p>
+								{/if}
+							</div>
+						</div>
+					{/if}
 				</div>
 
 				{#if publishError}

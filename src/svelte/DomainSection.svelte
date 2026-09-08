@@ -1,15 +1,18 @@
 <script lang="ts">
 	import { Notice } from 'obsidian';
+	import { onMount } from 'svelte';
 	import type FridayPlugin from '../main';
 
 	export let plugin: FridayPlugin;
 	export let projectName: string;
 	/** Called when domain becomes active so parent can refresh publish URL */
 	export let onDomainActive: ((hostname: string) => void) | undefined = undefined;
+	/** `embedded` = always expanded inside Advanced card (no fold chrome) */
+	export let layout: 'fold' | 'embedded' = 'fold';
 
 	type DomainStep = 'idle' | 'hostname' | 'dns' | 'ssl' | 'done';
 
-	let expanded = false;
+	let expanded = layout === 'embedded';
 	let loading = false;
 	let busy = false;
 	let statusMsg = '';
@@ -63,7 +66,16 @@
 								: t('ui.domain_status_not_configured');
 	$: domainTitle = t('ui.custom_domain');
 
+	$: if (layout === 'embedded' && !expanded) {
+		expanded = true;
+	}
+
+	onMount(() => {
+		if (layout === 'embedded' && projectName) void refresh();
+	});
+
 	async function toggle() {
+		if (layout === 'embedded') return;
 		expanded = !expanded;
 		if (expanded) {
 			await refresh();
@@ -344,7 +356,8 @@
 			: '';
 </script>
 
-<div class="capability-section mdf-fold">
+<div class="capability-section mdf-fold" class:is-embedded={layout === 'embedded'}>
+	{#if layout !== 'embedded'}
 	<button
 		type="button"
 		class="subsection-toggle mdf-fold-toggle"
@@ -367,9 +380,17 @@
 			<polyline points="9 18 15 12 9 6"></polyline>
 		</svg>
 	</button>
+	{/if}
 
-	{#if expanded}
+	{#if expanded || layout === 'embedded'}
 		<div class="capability-body">
+			{#if layout === 'embedded'}
+				<div class="embedded-status">
+					<span class="domain-status" class:bound={!!activeHostname}>
+						{activeHostname ? `${t('ui.domain_bound')} ${activeHostname}` : summaryLine}
+					</span>
+				</div>
+			{/if}
 			{#if loading}
 				<p class="field-hint">Loading…</p>
 			{:else if !hasKey}
