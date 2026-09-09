@@ -1810,6 +1810,9 @@
 				return;
 			}
 
+			// Persist access password before themed build (same as publish).
+			await saveFoundryConfig('params.password', sitePassword.trim() || '');
+
 			// Themed: Foundry default SSG serve (no custom Obsidian renderer)
 			if (plugin.handleSiteEvent) {
 				await plugin.handleSiteEvent('previewRequested', {
@@ -1872,6 +1875,8 @@
 
 			const publishConfig = { method: 'cloudflare' as const, config: undefined };
 			resetPublishState();
+
+			await saveFoundryConfig('params.password', sitePassword.trim() || '');
 
 			if (plugin.handleSiteEvent) {
 				await plugin.handleSiteEvent('previewRequested', {

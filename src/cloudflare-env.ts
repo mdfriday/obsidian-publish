@@ -18,6 +18,8 @@ export interface CloudflareEndpoints {
   accountBaseUrl: string;
   /** Hosted Turnstile challenge (HTTPS). Empty for local (skip). */
   guestChallengeUrl: string;
+  /** Theme / base static assets (pack chrome, encrypt gate, …). */
+  cdnBaseUrl: string;
 }
 
 /** Injected by esbuild (`MDF_CF_ENV` or production→staging / watch→local). */
@@ -38,18 +40,22 @@ export const CLOUDFLARE_ENV_PRESETS: Record<CloudflareEnvResolved, CloudflareEnd
     publicBaseUrl: 'http://127.0.0.1:8788',
     accountBaseUrl: 'http://127.0.0.1:8080/account',
     guestChallengeUrl: '',
+    // Local Foundry still loads published theme chrome from staging CDN.
+    cdnBaseUrl: 'https://cdn.fsky.top',
   },
   staging: {
     apiBaseUrl: 'https://api.fsky.top',
     publicBaseUrl: 'https://share.fsky.top',
     accountBaseUrl: 'https://fsky.top/account',
     guestChallengeUrl: 'https://fsky.top/guest-challenge/',
+    cdnBaseUrl: 'https://cdn.fsky.top',
   },
   production: {
     apiBaseUrl: 'https://api.mdfriday.com',
     publicBaseUrl: 'https://share.mdfriday.com',
     accountBaseUrl: 'https://mdfriday.com/account',
     guestChallengeUrl: 'https://mdfriday.com/guest-challenge/',
+    cdnBaseUrl: 'https://cdn.mdfriday.com',
   },
 };
 
@@ -143,6 +149,21 @@ export function resolvePublicBaseUrl(settings: {
       ? settings.cloudflareEnv
       : 'staging');
   return endpointsForEnv(resolved).publicBaseUrl.replace(/\/$/, '');
+}
+
+/** Theme CDN origin for base/family static assets (encrypt gate, pack chrome). */
+export function resolveCdnBaseUrl(settings: {
+  cloudflareResolvedEnv?: CloudflareEnvResolved | null;
+  cloudflareEnv?: CloudflareEnvMode;
+}): string {
+  const resolved =
+    settings.cloudflareResolvedEnv ||
+    (settings.cloudflareEnv === 'local' ||
+    settings.cloudflareEnv === 'staging' ||
+    settings.cloudflareEnv === 'production'
+      ? settings.cloudflareEnv
+      : 'staging');
+  return endpointsForEnv(resolved).cdnBaseUrl.replace(/\/$/, '');
 }
 
 /** Use Obsidian requestUrl — browser fetch from app://obsidian.md is CORS-blocked. */

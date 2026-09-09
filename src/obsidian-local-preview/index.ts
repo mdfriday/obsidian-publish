@@ -18,7 +18,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'crypto';
+import { resolveCdnBaseUrl } from '../cloudflare-env';
 import { buildEncryptGateHtml, encryptAESGCM } from './encrypt';
+
+function resolveFaithfulEncryptCdn(plugin: Plugin): string {
+	const settings = (plugin as { settings?: Parameters<typeof resolveCdnBaseUrl>[0] }).settings;
+	return settings ? resolveCdnBaseUrl(settings) : 'https://cdn.fsky.top';
+}
 
 export type ThemeSnapshot = {
 	generatedAt: number;
@@ -871,6 +877,7 @@ export async function writeFaithfulPackage(
 			level: 'page',
 			path: '/',
 			titleZh: '这篇笔记已加密，请输入密码解锁。',
+			cdnOrigin: resolveFaithfulEncryptCdn(plugin),
 		});
 		bodyMain = gate.bodyInner;
 		encryptHead = gate.headExtra;
@@ -887,7 +894,6 @@ export async function writeFaithfulPackage(
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(rendered.title)} · MDFriday</title>
-  ${encryptHead}
   <style>
 /* core */
 ${snapshot.css.core}
@@ -933,6 +939,7 @@ ${snapshot.css.vars}
 }
 
   </style>
+  ${encryptHead}
 </head>
 <body style="overflow: auto; -webkit-user-select: text; -moz-user-select: text; user-select: text;" class="${escapeHtml(themeClassAttr)}">
   ${bodyMain}
@@ -958,7 +965,12 @@ export async function buildFaithfulToProject(
 ): Promise<FaithfulPackageResult> {
 	const { file, publicDir } = opts;
 	await fs.promises.rm(publicDir, { recursive: true, force: true });
-	return writeFaithfulPackage(plugin, { file, absRoot: publicDir, title: opts.title });
+	return writeFaithfulPackage(plugin, {
+		file,
+		absRoot: publicDir,
+		title: opts.title,
+		password: opts.password,
+	});
 }
 
 /**
@@ -977,7 +989,12 @@ export async function packageSingleNotePreview(
 			.digest('hex')
 			.slice(0, 10)}`,
 	);
-	const packaged = await writeFaithfulPackage(plugin, { file, absRoot, title: opts.title });
+	const packaged = await writeFaithfulPackage(plugin, {
+		file,
+		absRoot,
+		title: opts.title,
+		password: opts.password,
+	});
 	const server = await startStaticServer(packaged.rootDir);
 	activeServers.push(server);
 	return {

@@ -2,14 +2,15 @@
  * Theme catalog — CDN public snapshot (C7) + API entitlement/packUrl merge.
  */
 
-import {requestUrl} from 'obsidian';
-import type {CatalogEntry, ThemeSearchResult} from './types';
+import { resolveCdnBaseUrl } from '../cloudflare-env';
 import type FridayPlugin from '../main';
 import {
 	entitlementContextFromApi,
 	mergePublicCatalogEntry,
 	type PublicCatalogEntry,
 } from './theme-entitlement';
+import type { CatalogEntry, ThemeSearchResult } from './types';
+import { requestUrl } from 'obsidian';
 
 interface ApiCatalogEntry extends PublicCatalogEntry {
 	entitled?: boolean;
@@ -32,8 +33,12 @@ function catalogApiBase(plugin?: FridayPlugin): string {
 	return 'https://api.fsky.top';
 }
 
-function catalogCdnBase(apiBase: string): string {
-	if (apiBase.includes('fsky.top') || apiBase.includes('127.0.0.1')) {
+function catalogCdnBase(plugin?: FridayPlugin, apiBase?: string): string {
+	if (plugin?.settings) {
+		return resolveCdnBaseUrl(plugin.settings);
+	}
+	const base = apiBase || '';
+	if (base.includes('fsky.top') || base.includes('127.0.0.1')) {
 		return 'https://cdn.fsky.top';
 	}
 	return 'https://cdn.mdfriday.com';
@@ -146,7 +151,7 @@ async function fetchEntitlements(
 
 async function fetchCatalog(plugin?: FridayPlugin): Promise<CatalogEntry[]> {
 	const apiBase = catalogApiBase(plugin);
-	const cdnBase = catalogCdnBase(apiBase);
+	const cdnBase = catalogCdnBase(plugin, apiBase);
 
 	let publicEntries: PublicCatalogEntry[];
 	try {

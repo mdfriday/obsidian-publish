@@ -1,9 +1,109 @@
 /**
- * AES-GCM helpers matching Foundry NodeTemplateCryptoService + theme decrypt.js.
- * Format: base64(salt[16] | iv[12] | tag[16] | ciphertext)
+ * Faithful-publish encrypt gate — same AES-GCM contract + UI as theme base encrypt cap.
+ *
+ * Build-time: Node encryptAESGCM (matches Foundry).
+ * Runtime: CSS/JS from theme CDN (`t/base/{ver}/…`).
+ *
+ * Faithful packages also embed Obsidian app/theme CSS. That sheet uses selectors like
+ * `.theme-light button` (specificity beats `.mdf-btn-primary`), so gate assets must:
+ *   1. Load *after* Obsidian CSS
+ *   2. Re-assert colors under `#mdf-encrypt-modal` (gate-only island; does not touch note HTML)
  */
 
 import * as crypto from 'crypto';
+
+/**
+ * Concrete CDN folder for base encrypt assets.
+ * Keep aligned with notes/quartz `engine.base` (e.g. ^2.2.1 → 2.2.1).
+ */
+export const ENCRYPT_GATE_BASE_VERSION = '2.2.1';
+
+/**
+ * Gate-only overrides. Scoped to `#mdf-encrypt-modal` so Obsidian preview CSS
+ * cannot restyle the unlock UI, and unlock styles cannot leak into note content.
+ */
+export const ENCRYPT_GATE_ISOLATE_CSS = `
+#mdf-encrypt-modal {
+  color: var(--mdf-encrypt-base-dark, #0d0f2c);
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+#mdf-encrypt-modal *,
+#mdf-encrypt-modal *::before,
+#mdf-encrypt-modal *::after {
+  box-sizing: border-box;
+}
+#mdf-encrypt-modal .mdf-unlock-title,
+#mdf-encrypt-modal .mdf-unlock-label {
+  color: var(--mdf-encrypt-base-dark, #0d0f2c);
+}
+#mdf-encrypt-modal .mdf-unlock-zh,
+#mdf-encrypt-modal .mdf-unlock-helper {
+  color: var(--mdf-encrypt-grey-500, #969bb5);
+}
+#mdf-encrypt-modal .mdf-unlock-body {
+  color: var(--mdf-encrypt-grey-600, #656c86);
+}
+#mdf-encrypt-modal #mdf-password-input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--mdf-encrypt-grey-200, #e6eaf4);
+  border-radius: 12px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--mdf-encrypt-base-dark, #0d0f2c);
+  background: #fff;
+  font-family: inherit;
+}
+#mdf-encrypt-modal #mdf-password-input:focus {
+  outline: none;
+  border-color: var(--mdf-encrypt-indigo-500, #3e57da);
+  box-shadow: 0 0 0 3px rgba(62, 87, 218, 0.15);
+}
+#mdf-encrypt-modal #mdf-password-input.is-error,
+#mdf-encrypt-modal .mdf-unlock-card.is-error #mdf-password-input {
+  border-color: var(--mdf-encrypt-danger, #d92d20);
+  background: var(--mdf-encrypt-danger-bg, #fef3f2);
+}
+#mdf-encrypt-modal #mdf-decrypt-btn,
+#mdf-encrypt-modal .mdf-btn-primary {
+  appearance: none;
+  -webkit-appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin-top: 16px;
+  padding: 14px 22px;
+  border: none;
+  border-radius: var(--mdf-encrypt-radius-btn, 999px);
+  background: var(--mdf-encrypt-indigo-500, #3e57da);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 12px rgba(62, 87, 218, 0.28);
+}
+#mdf-encrypt-modal #mdf-decrypt-btn:hover:not(:disabled),
+#mdf-encrypt-modal .mdf-btn-primary:hover:not(:disabled) {
+  background: var(--mdf-encrypt-indigo-600, #2c43b8);
+  color: #fff;
+}
+#mdf-encrypt-modal #mdf-decrypt-btn:disabled,
+#mdf-encrypt-modal .mdf-btn-primary:disabled {
+  cursor: wait;
+  opacity: 0.85;
+  color: #fff;
+}
+#mdf-encrypt-modal #mdf-error-message {
+  color: var(--mdf-encrypt-danger, #d92d20);
+}
+`.trim();
 
 export function encryptAESGCM(password: string, content: string): string {
 	if (!password || !content) return '';
@@ -16,188 +116,88 @@ export function encryptAESGCM(password: string, content: string): string {
 	return Buffer.concat([salt, iv, tag, encrypted]).toString('base64');
 }
 
-/** Minimal decrypt.js (same contract as theme/families/base/static/decrypt.js). */
-export const DECRYPT_JS = `async function decryptAESGCM(password, base64Data) {
-  const raw = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
-  const salt = raw.slice(0, 16);
-  const iv = raw.slice(16, 28);
-  const tag = raw.slice(28, 44);
-  const ciphertext = raw.slice(44);
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]
-  );
-  const key = await crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
-    keyMaterial,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["decrypt"]
-  );
-  const ciphertextWithTag = new Uint8Array(ciphertext.length + tag.length);
-  ciphertextWithTag.set(ciphertext);
-  ciphertextWithTag.set(tag, ciphertext.length);
-  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertextWithTag);
-  return new TextDecoder().decode(decrypted);
+/** Absolute URLs for base encrypt gate assets on theme CDN. */
+export function encryptGateAssetUrls(
+	cdnOrigin: string,
+	baseVersion: string = ENCRYPT_GATE_BASE_VERSION,
+): { css: string; js: string } {
+	const root = `${cdnOrigin.replace(/\/$/, '')}/t/base/${baseVersion}`;
+	return {
+		css: `${root}/caps/encrypt/style.css`,
+		js: `${root}/decrypt.js`,
+	};
 }
 
-async function handleDecryption(providedPassword = null) {
-  const contentEl = document.getElementById("mdf-encrypt-content");
-  const passwordInput = document.getElementById("mdf-password-input");
-  const errorMsg = document.getElementById("mdf-error-message");
-  const decryptBtn = document.getElementById("mdf-decrypt-btn");
-  const modal = document.getElementById("mdf-encrypt-modal");
-  if (!contentEl) return;
-  const encrypted = contentEl.dataset.encrypted;
-  const path = contentEl.dataset.path || "";
-  let password = providedPassword;
-  if (!password && passwordInput) password = passwordInput.value.trim();
-  if (!password) {
-    if (errorMsg) {
-      errorMsg.textContent = "Please enter your password";
-      errorMsg.classList.remove("mdf-error-hidden");
-    }
-    return;
-  }
-  if (!providedPassword && decryptBtn) {
-    decryptBtn.disabled = true;
-    decryptBtn.textContent = "Unlocking…";
-  }
-  if (errorMsg) errorMsg.classList.add("mdf-error-hidden");
-  try {
-    const content = await decryptAESGCM(password, encrypted);
-    contentEl.innerHTML = content;
-    contentEl.removeAttribute("data-encrypted");
-    contentEl.removeAttribute("data-level");
-    contentEl.removeAttribute("data-path");
-    if (modal) modal.style.display = "none";
-    if (path) sessionStorage.setItem("mdf-password-" + path, password);
-    return true;
-  } catch (e) {
-    if (providedPassword) return false;
-    if (errorMsg) {
-      errorMsg.textContent = "Incorrect password, please try again.";
-      errorMsg.classList.remove("mdf-error-hidden");
-    }
-    if (passwordInput) { passwordInput.value = ""; passwordInput.focus(); }
-    return false;
-  } finally {
-    if (!providedPassword && decryptBtn) {
-      decryptBtn.disabled = false;
-      decryptBtn.textContent = "Unlock";
-    }
-  }
+function escapeAttr(value: string): string {
+	return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
-async function tryAutoDecrypt() {
-  const contentEl = document.getElementById("mdf-encrypt-content");
-  if (!contentEl) return false;
-  const path = contentEl.dataset.path || "";
-  if (!path) return false;
-  const cached = sessionStorage.getItem("mdf-password-" + path);
-  if (!cached) return false;
-  const ok = await handleDecryption(cached);
-  if (!ok) sessionStorage.removeItem("mdf-password-" + path);
-  return ok;
-}
-
-async function initEncryptedContent() {
-  const contentEl = document.getElementById("mdf-encrypt-content");
-  if (!contentEl) return;
-  const modal = document.getElementById("mdf-encrypt-modal");
-  const decryptBtn = document.getElementById("mdf-decrypt-btn");
-  const passwordInput = document.getElementById("mdf-password-input");
-  if (await tryAutoDecrypt()) {
-    if (modal) modal.style.display = "none";
-    return;
-  }
-  if (modal) modal.style.display = "flex";
-  if (decryptBtn) decryptBtn.addEventListener("click", () => handleDecryption());
-  if (passwordInput) {
-    passwordInput.addEventListener("keypress", (e) => {
-      if (e.key === "Enter") handleDecryption();
-    });
-  }
-}
-
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initEncryptedContent);
-} else {
-  initEncryptedContent();
-}
-`;
-
-export const ENCRYPT_CSS = `
-.mdf-modal {
-  position: fixed; z-index: 9999; inset: 0;
-  display: none; justify-content: center; align-items: center;
-  background: rgba(0,0,0,.35);
-}
-.mdf-modal-content {
-  background: #fff; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,.2);
-  max-width: 420px; width: 90%;
-}
-.mdf-modal-header { padding: 20px 24px; border-bottom: 1px solid #e0e0e0; }
-.mdf-modal-header h2 { margin: 0; font-size: 1.25rem; color: #333; }
-.mdf-modal-body { padding: 24px; }
-.mdf-modal-body p { margin: 0 0 16px; color: #666; }
-#mdf-password-input {
-  width: 100%; padding: 12px 16px; border: 2px solid #e0e0e0;
-  border-radius: 4px; font-size: 1rem; box-sizing: border-box;
-}
-#mdf-password-input:focus { outline: none; border-color: #3E57DA; }
-#mdf-error-message {
-  margin-top: 12px; padding: 8px 12px; background: #ffebee; color: #c62828;
-  border-radius: 4px; font-size: 0.9rem;
-}
-.mdf-error-hidden { display: none; }
-.mdf-modal-footer {
-  padding: 16px 24px; border-top: 1px solid #e0e0e0;
-  display: flex; justify-content: flex-end;
-}
-.mdf-btn-primary {
-  background: #3E57DA; color: #fff; border: none;
-  padding: 10px 24px; border-radius: 6px; font-size: 1rem; cursor: pointer;
-}
-.mdf-btn-primary:hover { filter: brightness(1.05); }
-@media (prefers-color-scheme: dark) {
-  .mdf-modal-content { background: #1e1e1e; }
-  .mdf-modal-header h2 { color: #eee; }
-  .mdf-modal-body p { color: #aaa; }
-  #mdf-password-input { background: #111; color: #eee; border-color: #444; }
-}
-`;
-
+/**
+ * Markup matching theme `encrypt-content` + `encrypt-modal` partials.
+ * `headExtra` must be placed *after* Obsidian theme CSS in faithful packages.
+ */
 export function buildEncryptGateHtml(opts: {
 	encryptedBase64: string;
 	/** page = single note; site = folder / whole site */
 	level: 'page' | 'site';
 	path: string;
 	titleZh: string;
+	/** Theme CDN origin, e.g. https://cdn.fsky.top */
+	cdnOrigin: string;
+	baseVersion?: string;
 }): { bodyInner: string; headExtra: string } {
-	const title =
-		opts.level === 'site' ? 'This site is encrypted' : 'This note is encrypted';
-	const headExtra = `<style>${ENCRYPT_CSS}</style>`;
+	const assets = encryptGateAssetUrls(opts.cdnOrigin, opts.baseVersion);
+	const eyebrow =
+		opts.level === 'site'
+			? 'Protected site · Password required'
+			: 'Protected content · Password required';
+	const body =
+		opts.level === 'site'
+			? 'This site is encrypted by the publisher. Enter the access password to decrypt and view.'
+			: 'This page is encrypted by the publisher. Enter the access password to decrypt and view.';
+	const zh = opts.titleZh || '内容已加密，输入访问密码后继续';
+
+	const headExtra = `<link rel="stylesheet" href="${escapeAttr(assets.css)}">
+<style id="mdf-encrypt-isolate">${ENCRYPT_GATE_ISOLATE_CSS}</style>`;
 	const bodyInner = `
 <div
   id="mdf-encrypt-content"
-  data-encrypted="${opts.encryptedBase64.replace(/"/g, '&quot;')}"
+  data-encrypted="${escapeAttr(opts.encryptedBase64)}"
   data-level="${opts.level}"
-  data-path="${opts.path.replace(/"/g, '&quot;')}"
+  data-path="${escapeAttr(opts.path)}"
 ></div>
-<div id="mdf-encrypt-modal" class="mdf-modal">
+<div id="mdf-encrypt-modal" class="mdf-modal" role="dialog" aria-modal="true" aria-labelledby="mdf-unlock-title">
+  <div class="mdf-modal__decor" aria-hidden="true">
+    <div class="mdf-modal__blob mdf-modal__blob--1"></div>
+    <div class="mdf-modal__blob mdf-modal__blob--2"></div>
+  </div>
   <div class="mdf-modal-content">
-    <div class="mdf-modal-header"><h2>${title}</h2></div>
-    <div class="mdf-modal-body">
-      <p>${opts.titleZh}</p>
-      <input type="password" id="mdf-password-input" placeholder="Password" autofocus />
-      <div id="mdf-error-message" class="mdf-error-hidden">Incorrect password, please try again.</div>
+    <div class="mdf-unlock-eyebrow">
+      <span class="mdf-unlock-eyebrow__dot" aria-hidden="true"></span>
+      <span>${eyebrow}</span>
     </div>
-    <div class="mdf-modal-footer">
-      <button id="mdf-decrypt-btn" class="mdf-btn-primary">Unlock</button>
+    <h1 class="mdf-unlock-title" id="mdf-unlock-title">Enter password to continue</h1>
+    <p class="mdf-unlock-zh" lang="zh-CN">${zh}</p>
+    <p class="mdf-unlock-body">${body}</p>
+    <div class="mdf-unlock-card" id="mdf-unlock-card">
+      <label class="mdf-unlock-label" for="mdf-password-input">Access password</label>
+      <input
+        type="password"
+        id="mdf-password-input"
+        class="mdf-unlock-input"
+        placeholder="Access password"
+        autocomplete="current-password"
+        autofocus
+      />
+      <div id="mdf-error-message" class="mdf-error-hidden" role="alert">
+        Wrong password. Check with the publisher and try again.
+      </div>
+      <button type="button" id="mdf-decrypt-btn" class="mdf-btn-primary">Unlock</button>
+      <p class="mdf-unlock-helper">Contact the publisher if you don’t have the password.</p>
     </div>
   </div>
 </div>
-<script>${DECRYPT_JS}</script>
+<script defer src="${escapeAttr(assets.js)}"></script>
 `;
 	return { bodyInner, headExtra };
 }
