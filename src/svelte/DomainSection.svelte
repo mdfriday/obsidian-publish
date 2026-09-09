@@ -18,6 +18,7 @@
 	let loading = false;
 	let busy = false;
 	let statusMsg = '';
+	let statusMsgError = false;
 	let step: DomainStep = 'idle';
 	let remoteProjectId: string | null = null;
 	let hostnameInput = '';
@@ -96,9 +97,23 @@
 			sslTxts = [];
 			dcvCnames = [];
 			step = 'idle';
-			statusMsg = '';
+			clearStatus();
 		}
 	}
+
+	function setStatus(msg: string, error = false) {
+		statusMsg = msg;
+		statusMsgError = error;
+	}
+
+	function clearStatus() {
+		statusMsg = '';
+		statusMsgError = false;
+	}
+
+	/** Cert poll: Cloudflare SaaS often needs 1–5+ min; 30s balances UX vs API load. */
+	const CERT_POLL_INTERVAL_MS = 30_000;
+	const CERT_POLL_ROUNDS = 12;
 
 	async function toggle() {
 		if (layout === 'embedded') return;
@@ -118,7 +133,7 @@
 	async function refresh() {
 		if (!projectName || !plugin.foundryPublishService) return;
 		loading = true;
-		statusMsg = '';
+		clearStatus();
 		try {
 			const foundry = plugin.foundryPublishService;
 			const bind = await foundry.getCloudflareBinding({
@@ -134,12 +149,12 @@
 			remoteProjectId = bind.cloudflareProjectId;
 			const token = await resolveAuth();
 			if (!token) {
-				statusMsg = t('ui.domain_need_auth_hint');
+				setStatus(t('ui.domain_need_auth_hint'), true);
 				return;
 			}
 			const res = await foundry.listDomains(token, remoteProjectId);
 			if (!res.success) {
-				statusMsg = res.error || 'Failed to load domains';
+				setStatus(res.error || 'Failed to load domains', true);
 				return;
 			}
 			const domains = (res.domains || []).filter((d) => {
@@ -216,28 +231,28 @@
 	async function submitHostname() {
 		const host = hostnameInput.trim().toLowerCase();
 		if (!host || host.includes('/') || host.includes(' ')) {
-			statusMsg = t('ui.domain_step1_hint');
+			setStatus(t('ui.domain_step1_hint'));
 			return;
 		}
 		const foundry = plugin.foundryPublishService;
 		if (!foundry || !remoteProjectId) return;
 		const token = await resolveAuth();
 		if (!token) {
-			statusMsg = t('ui.domain_need_auth_hint');
+			setStatus(t('ui.domain_need_auth_hint'), true);
 			return;
 		}
 		busy = true;
-		statusMsg = '';
+		clearStatus();
 		const res = await foundry.addDomain(token, remoteProjectId, host);
 		busy = false;
 		if (!res.success) {
 			if (res.code === 'plan_required') {
-				statusMsg = t('ui.domain_upgrade_hint');
+				setStatus(t('ui.domain_upgrade_hint'), true);
 			} else if (res.code === 'conflict' && res.details?.reason === 'bound_other_project') {
 				const title = String(res.details.boundProjectTitle || res.details.boundProjectId || '');
-				statusMsg = t('ui.domain_conflict_other_project').replace('{{title}}', title);
+				setStatus(t('ui.domain_conflict_other_project').replace('{{title}}', title), true);
 			} else {
-				statusMsg = res.error || 'Failed to add domain';
+				setStatus(res.error || 'Failed to add domain', true);
 			}
 			return;
 		}
@@ -254,12 +269,12 @@
 		const st = (res.status || '').toLowerCase();
 		if (res.mode === 'resume' && st && st !== 'pending' && st !== 'verifying') {
 			step = 'ssl';
-			statusMsg = '';
+			clearStatus();
 			await pollCert(false);
 			return;
 		}
 		step = 'dns';
-		statusMsg = '';
+		clearStatus();
 	}
 
 	async function runVerify() {
@@ -268,11 +283,11 @@
 		const token = await resolveAuth();
 		if (!token) return;
 		busy = true;
-		statusMsg = '';
+		clearStatus();
 		const verified = await foundry.verifyDomain(token, domainId);
 		busy = false;
 		if (!verified.success) {
-			statusMsg = verified.error || t('ui.domain_status_error');
+			setStatus(verified.error || t('ui.domain_status_error'), true);
 			return;
 		}
 		if (verified.activated) {
@@ -281,7 +296,7 @@
 		}
 		applySslHints(verified);
 		step = 'ssl';
-		statusMsg = '';
+		clearStatus();
 		await pollCert(false);
 	}
 
@@ -291,12 +306,12 @@
 		const token = await resolveAuth();
 		if (!token) return;
 		busy = true;
-		const max = loop ? 12 : 1;
+		const max = loop ? CERT_POLL_ROUNDS : 1;
 		for (let i = 0; i < max; i++) {
-			statusMsg = `${t('ui.domain_https_wait')} (${i + 1}/${max})`;
+			setStatus(`${t('ui.domain_https_wait')} (${i + 1}/${max})`);
 			const sync = await foundry.syncDomainCert(token, domainId);
 			if (!sync.success) {
-				statusMsg = sync.error || 'sync-cert failed';
+				setStatus(sync.error || 'sync-cert failed', true);
 				busy = false;
 				return;
 			}
@@ -316,14 +331,15 @@
 			}
 			domainStatus = sync.status || domainStatus;
 			if (i < max - 1) {
-				await new Promise((r) => setTimeout(r, 5000));
+				await new Promise((r) => setTimeout(r, CERT_POLL_INTERVAL_MS));
 			}
 		}
 		busy = false;
-		statusMsg =
-			dcvCnames.length || sslTxts.length
-				? ''
-				: t('ui.domain_https_records_missing');
+		if (dcvCnames.length || sslTxts.length) {
+			clearStatus();
+		} else {
+			setStatus(t('ui.domain_https_records_missing'));
+		}
 	}
 
 	async function onActivated() {
@@ -339,7 +355,7 @@
 		domainStatus = 'active';
 		certStatus = 'active';
 		step = 'done';
-		statusMsg = '';
+		clearStatus();
 		new Notice(
 			`${t('ui.domain_bound_label')} ${hostnameInput} — ${t('ui.domain_done_hint')}`,
 			6000,
@@ -364,7 +380,7 @@
 		sslTxts = [];
 		dcvCnames = [];
 		step = next;
-		statusMsg = '';
+		clearStatus();
 	}
 
 	async function revokeDomain() {
@@ -378,17 +394,17 @@
 		if (!ok) return;
 		const token = await resolveAuth();
 		if (!token) {
-			statusMsg = t('ui.domain_need_auth_hint');
+			setStatus(t('ui.domain_need_auth_hint'), true);
 			return;
 		}
 		busy = true;
-		statusMsg = '';
+		clearStatus();
 		const foundry = plugin.foundryPublishService;
 		const removingId = domainId;
 		const res = await foundry.removeDomain(token, removingId);
 		if (!res.success) {
 			busy = false;
-			statusMsg = res.error || 'Failed to unbind domain';
+			setStatus(res.error || 'Failed to unbind domain', true);
 			return;
 		}
 		if (projectName) {
@@ -644,7 +660,7 @@
 			{/if}
 
 			{#if statusMsg}
-				<p class="mod-warning capability-status">{statusMsg}</p>
+				<p class="capability-status" class:is-error={statusMsgError}>{statusMsg}</p>
 			{/if}
 		</div>
 	{/if}
@@ -789,8 +805,14 @@
 	}
 
 	.capability-status {
-		margin: 0;
+		margin: 8px 0 0;
 		font-size: 12px;
+		color: var(--text-muted);
+		line-height: 1.4;
+	}
+
+	.capability-status.is-error {
+		color: var(--text-error, var(--text-accent));
 	}
 
 	.section-label {

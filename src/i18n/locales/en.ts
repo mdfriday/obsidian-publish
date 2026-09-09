@@ -680,7 +680,7 @@ export const en = {
 		domain_https_records_loading: "Fetching HTTPS DNS records from Cloudflare… Tap Refresh if the table is empty.",
 		domain_https_records_missing: "No HTTPS records yet. Tap Refresh status — after re-binding, Cloudflare may need a moment to return the challenge.",
 		domain_refresh_status: "Refresh status",
-		domain_wait_refresh: "Keep checking (about 1 min)",
+		domain_wait_refresh: "Keep checking (about 6 min)",
 		domain_done_hint: "Publish once more, then open your site on this domain.",
 		domain_revoke: "Unbind",
 		domain_unbind_confirm:

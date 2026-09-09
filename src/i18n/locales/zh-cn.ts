@@ -649,7 +649,7 @@ export const zhCn = {
 		domain_https_records_loading: "正在从 Cloudflare 获取 HTTPS 解析记录… 若表格为空请点「刷新状态」。",
 		domain_https_records_missing: "尚未拿到 HTTPS 记录。请点「刷新状态」——重新绑定后 Cloudflare 有时需要片刻才会返回校验信息。",
 		domain_refresh_status: "刷新状态",
-		domain_wait_refresh: "持续检查（约 1 分钟）",
+		domain_wait_refresh: "持续检查（约 6 分钟）",
 		domain_done_hint: "再发布一次后，即可用该域名访问站点。",
 		domain_revoke: "解除绑定",
 		domain_unbind_confirm:

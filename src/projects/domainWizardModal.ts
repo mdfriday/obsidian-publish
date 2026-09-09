@@ -26,7 +26,11 @@ export class DomainWizardModal extends Modal {
 	private sslStatus = '';
 	private certStatus = '';
 	private statusMsg = '';
+	private statusMsgError = false;
 	private busy = false;
+
+	private static readonly CERT_POLL_INTERVAL_MS = 30_000;
+	private static readonly CERT_POLL_ROUNDS = 12;
 
 	constructor(
 		app: App,
@@ -82,7 +86,10 @@ export class DomainWizardModal extends Modal {
 		});
 
 		if (this.statusMsg) {
-			contentEl.createEl('p', { text: this.statusMsg, cls: 'mod-warning' });
+			contentEl.createEl('p', {
+				text: this.statusMsg,
+				cls: this.statusMsgError ? 'mod-warning' : 'setting-item-description',
+			});
 		}
 
 		if (this.step === 'hostname') {
@@ -166,7 +173,7 @@ export class DomainWizardModal extends Modal {
 			} else {
 				contentEl.createEl('p', {
 					text: 'Records not ready yet — tap Refresh status in a few seconds.',
-					cls: 'mod-warning',
+					cls: 'setting-item-description',
 				});
 			}
 
@@ -253,40 +260,55 @@ export class DomainWizardModal extends Modal {
 		return auth?.token ?? null;
 	}
 
+	private setStatus(msg: string, error = false) {
+		this.statusMsg = msg;
+		this.statusMsgError = error;
+	}
+
+	private clearStatus() {
+		this.statusMsg = '';
+		this.statusMsgError = false;
+	}
+
 	private async submitHostname() {
 		const host = this.hostnameInput.trim().toLowerCase();
 		if (!host || host.includes('/') || host.includes(' ')) {
-			this.statusMsg = 'Enter a valid hostname.';
+			this.setStatus('Enter a valid hostname.');
 			this.render();
 			return;
 		}
 		const foundry = this.plugin.foundryPublishService;
 		if (!foundry) {
-			this.statusMsg = 'Publish service not ready.';
+			this.setStatus('Publish service not ready.', true);
 			this.render();
 			return;
 		}
 		const token = await this.resolveAuth();
 		if (!token) {
-			this.statusMsg = 'No MDF Key — publish once or open Account.';
+			this.setStatus('No MDF Key — publish once or open Account.', true);
 			this.render();
 			return;
 		}
 
 		this.busy = true;
-		this.statusMsg = 'Creating domain…';
+		this.setStatus('Creating domain…');
 		this.render();
 		const res = await foundry.addDomain(token, this.projectId, host);
 		this.busy = false;
 		if (!res.success) {
 			if (res.code === 'plan_required') {
-				this.statusMsg =
-					'Custom domains require Personal. Upgrade from Account or Settings.';
+				this.setStatus(
+					'Custom domains require Personal. Upgrade from Account or Settings.',
+					true,
+				);
 			} else if (res.code === 'conflict' && res.details?.reason === 'bound_other_project') {
 				const title = String(res.details.boundProjectTitle || res.details.boundProjectId || '');
-				this.statusMsg = `This domain is bound to another site (“${title}”). Unbind it there first.`;
+				this.setStatus(
+					`This domain is bound to another site (“${title}”). Unbind it there first.`,
+					true,
+				);
 			} else {
-				this.statusMsg = res.error || 'Failed to add domain';
+				this.setStatus(res.error || 'Failed to add domain', true);
 			}
 			this.render();
 			return;
@@ -303,13 +325,13 @@ export class DomainWizardModal extends Modal {
 		const st = (res.status || '').toLowerCase();
 		if (res.mode === 'resume' && st && st !== 'pending' && st !== 'verifying') {
 			this.step = 'ssl';
-			this.statusMsg = '';
+			this.clearStatus();
 			this.render();
 			await this.pollCert(false);
 			return;
 		}
 		this.step = 'dns';
-		this.statusMsg = '';
+		this.clearStatus();
 		this.render();
 	}
 
@@ -320,12 +342,15 @@ export class DomainWizardModal extends Modal {
 		if (!token) return;
 
 		this.busy = true;
-		this.statusMsg = 'Checking ownership TXT…';
+		this.setStatus('Checking ownership TXT…');
 		this.render();
 		const verified = await foundry.verifyDomain(token, this.domainId);
 		this.busy = false;
 		if (!verified.success) {
-			this.statusMsg = verified.error || 'Verify failed — is ownership TXT published?';
+			this.setStatus(
+				verified.error || 'Verify failed — is ownership TXT published?',
+				true,
+			);
 			this.render();
 			return;
 		}
@@ -335,7 +360,7 @@ export class DomainWizardModal extends Modal {
 		}
 		this.applySslHints(verified);
 		this.step = 'ssl';
-		this.statusMsg = '';
+		this.clearStatus();
 		this.render();
 		await this.pollCert(false);
 	}
@@ -347,25 +372,23 @@ export class DomainWizardModal extends Modal {
 		if (!token) return;
 
 		this.busy = true;
-		const max = loop ? 12 : 1;
+		const max = loop ? DomainWizardModal.CERT_POLL_ROUNDS : 1;
 		for (let i = 0; i < max; i++) {
-			this.statusMsg = `Checking certificate… (${i + 1}/${max})`;
+			this.setStatus(`Checking certificate… (${i + 1}/${max})`);
 			this.render();
 			const sync = await foundry.syncDomainCert(token, this.domainId);
 			if (!sync.success) {
-				this.statusMsg = sync.error || 'sync-cert failed';
+				this.setStatus(sync.error || 'sync-cert failed', true);
 				this.busy = false;
 				this.render();
 				return;
 			}
 			this.applySslHints(sync);
-			// Only treat as done when control plane activated (DB status flipped)
 			if (sync.activated || sync.status === 'active') {
 				this.busy = false;
 				await this.onActivated();
 				return;
 			}
-			// CF may report ssl active a beat before DB write — one forced retry
 			if (sync.sslStatus === 'active') {
 				const again = await foundry.syncDomainCert(token, this.domainId);
 				if (again.success && (again.activated || again.status === 'active')) {
@@ -374,14 +397,15 @@ export class DomainWizardModal extends Modal {
 					return;
 				}
 			}
-			this.statusMsg = 'Certificate still provisioning…';
+			this.setStatus('Certificate still provisioning…');
 			this.step = 'ssl';
 			this.render();
-			if (i < max - 1) await sleep(5000);
+			if (i < max - 1) await sleep(DomainWizardModal.CERT_POLL_INTERVAL_MS);
 		}
 		this.busy = false;
-		this.statusMsg =
-			'Still working. Confirm the HTTPS DNS record is live, wait 1–2 min, then Refresh status.';
+		this.setStatus(
+			'Still working. Confirm the HTTPS DNS record is live, wait 1–2 min, then Refresh status.',
+		);
 		this.render();
 	}
 
@@ -395,7 +419,7 @@ export class DomainWizardModal extends Modal {
 			});
 		}
 		this.step = 'done';
-		this.statusMsg = '';
+		this.clearStatus();
 		new Notice(
 			`Bound ${this.hostnameInput} — publish once more, then open https://${this.hostnameInput}/`,
 			6000,
@@ -403,6 +427,7 @@ export class DomainWizardModal extends Modal {
 		this.render();
 	}
 }
+
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
