@@ -228,20 +228,8 @@ export class FridaySettingTab extends PluginSettingTab {
 					btn.setButtonText('Upgrade…');
 					btn.setCta();
 					btn.onClick(async () => {
-						const mgr = this.plugin.projectServiceManager;
-						if (!mgr) {
-							new Notice('Publish service not ready', 3000);
-							return;
-						}
-						const key = await mgr.ensureMdfKey();
-						if (!key) {
-							new Notice('Could not create guest Key', 3000);
-							return;
-						}
-						const accountBase = resolveAccountBaseUrl(this.plugin.settings);
-						const url = `${accountBase}/?key=${encodeURIComponent(key)}`;
-						window.open(url, '_blank');
-						new Notice('Sign in on Account if needed, then click Upgrade to Personal.', 6000);
+						await this.plugin.openAccountInBrowser({ upgrade: 'personal' });
+						new Notice('Browser opens Account → Creem checkout for Personal.', 5000);
 					});
 				});
 		}

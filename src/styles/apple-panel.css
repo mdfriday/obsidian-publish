@@ -1847,3 +1847,23 @@
   font-size: 11px;
   color: var(--apple-secondary);
 }
+
+.mdf-apple-panel .apple-domain-slot .btn {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  min-height: 0;
+}
+
+.mdf-apple-panel .apple-domain-slot .capability-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.mdf-apple-panel .apple-domain-slot .dns-guide {
+  border-color: var(--apple-divider);
+  background: var(--apple-gray-fill);
+}

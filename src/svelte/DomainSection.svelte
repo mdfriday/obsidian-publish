@@ -7,6 +7,8 @@
 	export let projectName: string;
 	/** Called when domain becomes active so parent can refresh publish URL */
 	export let onDomainActive: ((hostname: string) => void) | undefined = undefined;
+	/** Called after successful unbind so parent can leave custom hostname URL */
+	export let onDomainCleared: (() => void) | undefined = undefined;
 	/** `embedded` = always expanded inside Advanced card (no fold chrome) */
 	export let layout: 'fold' | 'embedded' = 'fold';
 
@@ -29,6 +31,7 @@
 	let sslTxts: Array<{ txtName: string; txtValue: string; status?: string }> = [];
 	let dcvCnames: Array<{ cname: string; cnameTarget: string }> = [];
 	let sslStatus = '';
+	let showHostAdvanced = false;
 
 	$: canDomain =
 		(plugin.settings.mdfQuotaFeatures || []).includes('custom_domain') ||
@@ -131,7 +134,7 @@
 			remoteProjectId = bind.cloudflareProjectId;
 			const token = await resolveAuth();
 			if (!token) {
-				statusMsg = 'No MDF Key — publish once or open Account.';
+				statusMsg = t('ui.domain_need_auth_hint');
 				return;
 			}
 			const res = await foundry.listDomains(token, remoteProjectId);
@@ -139,13 +142,12 @@
 				statusMsg = res.error || 'Failed to load domains';
 				return;
 			}
-			const domains = res.domains || [];
-			const active = domains.find(
-				(d) => d.status === 'active' || d.certStatus === 'active',
-			);
-			const pending = domains.find(
-				(d) => d.status !== 'active' && d.status !== 'removed',
-			);
+			const domains = (res.domains || []).filter((d) => {
+				const st = (d.status || '').toLowerCase();
+				return st !== 'removed' && st !== 'unbound';
+			});
+			const active = domains.find((d) => (d.status || '').toLowerCase() === 'active');
+			const pending = domains.find((d) => (d.status || '').toLowerCase() !== 'active');
 			if (active?.hostname) {
 				activeHostname = active.hostname;
 				domainId = active.id;
@@ -164,25 +166,23 @@
 					txtValue = pending.ownershipToken;
 					txtName = `_mdfriday-verify.${pending.hostname}`;
 				}
-				// Ownership pending → DNS; otherwise resume SSL
 				const st = (pending.status || '').toLowerCase();
 				step = st === 'pending' || st === 'verifying' || !st ? 'dns' : 'ssl';
 				if (step === 'ssl') {
 					await pollCert(false);
 				}
 			} else {
-				activeHostname = null;
-				domainId = null;
-				step = canDomain ? 'hostname' : 'idle';
+				resetLocalDomainState(canDomain ? 'hostname' : 'idle');
 			}
 		} finally {
 			loading = false;
 		}
 	}
 
+	/** Registrar host column: strip apex (assumes 2-label TLD like example.com). */
 	function relativeHost(fqdn: string): string {
 		const host = fqdn.replace(/\.$/, '').toLowerCase();
-		const parts = host.split('.');
+		const parts = host.split('.').filter(Boolean);
 		if (parts.length >= 3) return parts.slice(0, -2).join('.');
 		return host;
 	}
@@ -190,7 +190,7 @@
 	async function copyText(value: string) {
 		if (!value) return;
 		await navigator.clipboard.writeText(value);
-		new Notice('Copied', 1500);
+		new Notice(t('ui.domain_copied'), 1500);
 	}
 
 	function applySslHints(sync: {
@@ -216,32 +216,48 @@
 	async function submitHostname() {
 		const host = hostnameInput.trim().toLowerCase();
 		if (!host || host.includes('/') || host.includes(' ')) {
-			statusMsg = 'Enter a valid hostname (e.g. www.example.com).';
+			statusMsg = t('ui.domain_step1_hint');
 			return;
 		}
 		const foundry = plugin.foundryPublishService;
 		if (!foundry || !remoteProjectId) return;
 		const token = await resolveAuth();
 		if (!token) {
-			statusMsg = 'No MDF Key';
+			statusMsg = t('ui.domain_need_auth_hint');
 			return;
 		}
 		busy = true;
-		statusMsg = 'Creating domain…';
+		statusMsg = '';
 		const res = await foundry.addDomain(token, remoteProjectId, host);
 		busy = false;
 		if (!res.success) {
-			statusMsg =
-				res.code === 'plan_required'
-					? 'Custom domains require Personal. Upgrade from Account.'
-					: res.error || 'Failed to add domain';
+			if (res.code === 'plan_required') {
+				statusMsg = t('ui.domain_upgrade_hint');
+			} else if (res.code === 'conflict' && res.details?.reason === 'bound_other_project') {
+				const title = String(res.details.boundProjectTitle || res.details.boundProjectId || '');
+				statusMsg = t('ui.domain_conflict_other_project').replace('{{title}}', title);
+			} else {
+				statusMsg = res.error || 'Failed to add domain';
+			}
 			return;
 		}
 		domainId = res.id || null;
+		hostnameInput = res.hostname || host;
+		cnameTarget = res.cnameTarget || cnameTarget;
+		if (res.mode === 'rebind' || res.mode === 'already_bound' || res.activated) {
+			await onActivated();
+			return;
+		}
 		txtName = res.txtName || '';
 		txtValue = res.txtValue || '';
-		cnameTarget = res.cnameTarget || '';
-		hostnameInput = res.hostname || host;
+		domainStatus = res.status || 'pending';
+		const st = (res.status || '').toLowerCase();
+		if (res.mode === 'resume' && st && st !== 'pending' && st !== 'verifying') {
+			step = 'ssl';
+			statusMsg = '';
+			await pollCert(false);
+			return;
+		}
 		step = 'dns';
 		statusMsg = '';
 	}
@@ -252,11 +268,11 @@
 		const token = await resolveAuth();
 		if (!token) return;
 		busy = true;
-		statusMsg = 'Checking ownership…';
+		statusMsg = '';
 		const verified = await foundry.verifyDomain(token, domainId);
 		busy = false;
 		if (!verified.success) {
-			statusMsg = verified.error || 'Verify failed — is ownership TXT published?';
+			statusMsg = verified.error || t('ui.domain_status_error');
 			return;
 		}
 		if (verified.activated) {
@@ -265,7 +281,7 @@
 		}
 		applySslHints(verified);
 		step = 'ssl';
-		statusMsg = 'Ownership verified. Add SSL records below, then Refresh.';
+		statusMsg = '';
 		await pollCert(false);
 	}
 
@@ -277,7 +293,7 @@
 		busy = true;
 		const max = loop ? 12 : 1;
 		for (let i = 0; i < max; i++) {
-			statusMsg = `Checking certificate… (${i + 1}/${max})`;
+			statusMsg = `${t('ui.domain_https_wait')} (${i + 1}/${max})`;
 			const sync = await foundry.syncDomainCert(token, domainId);
 			if (!sync.success) {
 				statusMsg = sync.error || 'sync-cert failed';
@@ -305,7 +321,9 @@
 		}
 		busy = false;
 		statusMsg =
-			'Still provisioning. Confirm DNS is live, wait 1–2 min, then Refresh again.';
+			dcvCnames.length || sslTxts.length
+				? ''
+				: t('ui.domain_https_records_missing');
 	}
 
 	async function onActivated() {
@@ -323,34 +341,54 @@
 		step = 'done';
 		statusMsg = '';
 		new Notice(
-			`Domain ${hostnameInput} is active — publish again so the site URL uses https://${hostnameInput}/`,
+			`${t('ui.domain_bound_label')} ${hostnameInput} — ${t('ui.domain_done_hint')}`,
 			6000,
 		);
 		onDomainActive?.(hostnameInput);
 	}
 
 	async function openAccountUpgrade() {
-		await plugin.openAccountInBrowser();
+		await plugin.openAccountInBrowser({ upgrade: 'personal' });
+	}
+
+	function resetLocalDomainState(next: DomainStep) {
+		domainId = null;
+		activeHostname = null;
+		hostnameInput = '';
+		domainStatus = '';
+		certStatus = '';
+		sslStatus = '';
+		txtName = '';
+		txtValue = '';
+		cnameTarget = '';
+		sslTxts = [];
+		dcvCnames = [];
+		step = next;
+		statusMsg = '';
 	}
 
 	async function revokeDomain() {
 		if (!domainId || !plugin.foundryPublishService) return;
 		const ok = confirm(
-			`Remove custom domain ${activeHostname || hostnameInput}? Share URL will be used again after the next publish.`,
+			t('ui.domain_unbind_confirm').replace(
+				'{{host}}',
+				activeHostname || hostnameInput || '',
+			),
 		);
 		if (!ok) return;
 		const token = await resolveAuth();
 		if (!token) {
-			statusMsg = 'No MDF Key';
+			statusMsg = t('ui.domain_need_auth_hint');
 			return;
 		}
 		busy = true;
-		statusMsg = 'Removing domain…';
+		statusMsg = '';
 		const foundry = plugin.foundryPublishService;
-		const res = await foundry.removeDomain(token, domainId);
+		const removingId = domainId;
+		const res = await foundry.removeDomain(token, removingId);
 		if (!res.success) {
 			busy = false;
-			statusMsg = res.error || 'Failed to remove domain';
+			statusMsg = res.error || 'Failed to unbind domain';
 			return;
 		}
 		if (projectName) {
@@ -361,22 +399,15 @@
 			});
 		}
 		busy = false;
-		domainId = null;
-		activeHostname = null;
-		hostnameInput = '';
-		step = canDomain ? 'hostname' : 'idle';
-		statusMsg = '';
-		new Notice('Custom domain removed', 3000);
+		resetLocalDomainState(canDomain ? 'hostname' : 'idle');
+		onDomainCleared?.();
+		new Notice(t('ui.domain_unbind_done'), 3000);
 		await refresh();
 	}
 
-	$: cnameHost = hostnameInput ? relativeHost(hostnameInput) : 'notes';
-	$: displayCnameTarget = cnameTarget || 'publish.mdfriday.com';
-	$: dnsStatusLine = activeHostname
-		? `Bound · ${certStatus || domainStatus || 'active'}`
-		: domainStatus
-			? `DNS: ${domainStatus}${certStatus ? ` · cert ${certStatus}` : ''}`
-			: '';
+	$: cnameHost = hostnameInput ? relativeHost(hostnameInput) : 'www';
+	$: displayCnameTarget = (cnameTarget || 'cname.sure40.com').replace(/\.$/, '');
+	$: txtHost = txtName ? relativeHost(txtName) : '';
 </script>
 
 <div class="capability-section mdf-fold" class:is-embedded={layout === 'embedded'}>
@@ -410,48 +441,63 @@
 			{#if layout === 'embedded'}
 				<div class="embedded-status">
 					<span class="domain-status" class:bound={!!activeHostname}>
-						{activeHostname ? `${t('ui.domain_bound')} ${activeHostname}` : summaryLine}
+						{activeHostname
+							? `${t('ui.domain_bound_label')} ${activeHostname}`
+							: summaryLine}
 					</span>
 				</div>
 			{/if}
 			{#if loading}
-				<p class="field-hint">Loading…</p>
+				<p class="field-hint">…</p>
 			{:else if !hasKey}
 				<p class="field-hint">{t('ui.domain_need_auth_hint')}</p>
-				<button class="mod-cta" on:click={openAccountUpgrade}>{t('ui.account_go_verify')}</button>
+				<button class="btn btn-primary" on:click={openAccountUpgrade}>{t('ui.account_go_verify')}</button>
 			{:else if !remoteProjectId}
 				<p class="field-hint">{t('ui.domain_publish_first_hint')}</p>
 			{:else if !canDomain && step !== 'done'}
 				<p class="field-hint">{t('ui.domain_upgrade_hint')}</p>
-				<button class="mod-cta" on:click={openAccountUpgrade}>{t('ui.account_upgrade_personal')}</button>
+				<button class="btn btn-primary" on:click={openAccountUpgrade}>{t('ui.account_upgrade_personal')}</button>
 			{:else}
-				{#if step !== 'done'}
-					<label class="section-label" for="domain-hostname">Domain</label>
-					<input
-						id="domain-hostname"
-						class="form-input"
-						type="text"
-						placeholder="notes.example.com"
-						bind:value={hostnameInput}
-						disabled={busy || step === 'ssl'}
-					/>
-					{#if step === 'hostname' || step === 'idle'}
-						<button class="mod-cta" on:click={submitHostname} disabled={busy}>
-							Continue
+				{#if step === 'hostname' || step === 'idle'}
+					<div class="dns-guide">
+						<div class="dns-guide-title">{t('ui.domain_step1_title')}</div>
+						<p class="field-hint">{t('ui.domain_step1_hint')}</p>
+						<label class="section-label" for="domain-hostname">{t('ui.domain_input_label')}</label>
+						<input
+							id="domain-hostname"
+							class="form-input"
+							type="text"
+							placeholder="www.example.com"
+							bind:value={hostnameInput}
+							disabled={busy}
+						/>
+						<button class="btn btn-primary" on:click={submitHostname} disabled={busy}>
+							{t('ui.domain_step1_cta')}
 						</button>
-					{/if}
+					</div>
 				{/if}
 
-				{#if step === 'dns' || step === 'ssl'}
+				{#if step === 'dns'}
 					<div class="dns-guide">
-						<div class="dns-guide-title">DNS setup</div>
+						<div class="dns-guide-title">{t('ui.domain_step2_title')}</div>
+						<p class="dns-host-hint">{t('ui.domain_host_hint')}</p>
+						<button
+							type="button"
+							class="copy-mini dns-advanced-toggle"
+							on:click={() => (showHostAdvanced = !showHostAdvanced)}
+						>
+							{showHostAdvanced ? '▾' : '▸'} {t('ui.domain_host_hint_advanced')}
+						</button>
+						{#if showHostAdvanced}
+							<p class="field-hint">{t('ui.domain_host_hint_advanced')}</p>
+						{/if}
 						<table class="dns-table">
 							<thead>
 								<tr>
-									<th>Type</th>
-									<th>Name</th>
-									<th>Value</th>
-									<th>Note</th>
+									<th>{t('ui.domain_type_col')}</th>
+									<th>{t('ui.domain_host_col')}</th>
+									<th>{t('ui.domain_value_col')}</th>
+									<th>{t('ui.domain_note_col')}</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -465,73 +511,109 @@
 										<code>{displayCnameTarget}</code>
 										<button type="button" class="copy-mini" on:click={() => copyText(displayCnameTarget)}>Copy</button>
 									</td>
-									<td>Required</td>
+									<td>{t('ui.domain_note_point')}</td>
 								</tr>
-								{#if txtName && txtValue}
+								{#if txtHost && txtValue}
 									<tr>
 										<td>TXT</td>
 										<td>
-											<code>{txtName}</code>
-											<button type="button" class="copy-mini" on:click={() => copyText(txtName)}>Copy</button>
+											<code>{txtHost}</code>
+											<button type="button" class="copy-mini" on:click={() => copyText(txtHost)}>Copy</button>
 										</td>
 										<td>
 											<code>{txtValue}</code>
 											<button type="button" class="copy-mini" on:click={() => copyText(txtValue)}>Copy</button>
 										</td>
-										<td>Verify</td>
+										<td>{t('ui.domain_note_verify')}</td>
 									</tr>
 								{/if}
 							</tbody>
 						</table>
 						<ol class="dns-steps">
-							<li>Add the records at your DNS provider</li>
-							<li>Wait for propagation (usually 5–30 minutes)</li>
-							<li>Click Verify DNS</li>
+							<li>{t('ui.domain_step2_li1')}</li>
+							<li>{t('ui.domain_step2_li2')}</li>
+							<li>{t('ui.domain_step2_li3')}</li>
 						</ol>
 						<div class="capability-actions">
-							<button class="action-button" on:click={refresh} disabled={busy}>Check status</button>
-							<button class="mod-cta" on:click={runVerify} disabled={busy}>Verify DNS</button>
+							<button class="btn btn-primary" on:click={runVerify} disabled={busy}>
+								{t('ui.domain_verify_cta')}
+							</button>
 						</div>
-						{#if dnsStatusLine}
-							<p class="dns-status">{dnsStatusLine}</p>
-						{/if}
 					</div>
 				{/if}
 
 				{#if step === 'ssl'}
-					<p class="field-hint">
-						SSL: {sslStatus || '—'} · cert: {certStatus || 'provisioning'}
-					</p>
-					{#if dcvCnames.length}
-						{#each dcvCnames as d}
-							<div class="dns-row">
-								<span class="dns-label">DCV CNAME</span>
-								<code class="dns-value">{d.cname}</code>
-								<button type="button" class="url-action-btn" on:click={() => copyText(d.cname)}>Copy</button>
-							</div>
-							<div class="dns-row">
-								<span class="dns-label">DCV target</span>
-								<code class="dns-value">{d.cnameTarget.replace(/\.$/, '')}</code>
-								<button type="button" class="url-action-btn" on:click={() => copyText(d.cnameTarget.replace(/\.$/, ''))}>Copy</button>
-							</div>
-						{/each}
-					{:else if sslTxts.length}
-						{#each sslTxts as r, i}
-							<div class="dns-row">
-								<span class="dns-label">ACME TXT #{i + 1}</span>
-								<code class="dns-value">{r.txtName}</code>
-								<button type="button" class="url-action-btn" on:click={() => copyText(r.txtName)}>Copy</button>
-							</div>
-							<div class="dns-row">
-								<span class="dns-label">Value #{i + 1}</span>
-								<code class="dns-value">{r.txtValue}</code>
-								<button type="button" class="url-action-btn" on:click={() => copyText(r.txtValue)}>Copy</button>
-							</div>
-						{/each}
-					{/if}
-					<div class="capability-actions">
-						<button class="mod-cta" on:click={() => pollCert(false)} disabled={busy}>Refresh cert</button>
-						<button class="action-button" on:click={() => pollCert(true)} disabled={busy}>Poll 1 min</button>
+					<div class="dns-guide">
+						<div class="dns-guide-title">{t('ui.domain_step3_title')}</div>
+						<p class="field-hint">{t('ui.domain_https_hint')}</p>
+						{#if dcvCnames.length || sslTxts.length}
+							<p class="dns-host-hint">{t('ui.domain_host_hint')}</p>
+							<table class="dns-table">
+								<thead>
+									<tr>
+										<th>{t('ui.domain_type_col')}</th>
+										<th>{t('ui.domain_host_col')}</th>
+										<th>{t('ui.domain_value_col')}</th>
+										<th>{t('ui.domain_note_col')}</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each dcvCnames as d}
+										<tr>
+											<td>CNAME</td>
+											<td>
+												<code>{relativeHost(d.cname)}</code>
+												<button
+													type="button"
+													class="copy-mini"
+													on:click={() => copyText(relativeHost(d.cname))}
+												>Copy</button>
+											</td>
+											<td>
+												<code>{d.cnameTarget.replace(/\.$/, '')}</code>
+												<button
+													type="button"
+													class="copy-mini"
+													on:click={() => copyText(d.cnameTarget.replace(/\.$/, ''))}
+												>Copy</button>
+											</td>
+											<td>{t('ui.domain_note_https')}</td>
+										</tr>
+									{/each}
+									{#if !dcvCnames.length}
+										{#each sslTxts as r}
+											<tr>
+												<td>TXT</td>
+												<td>
+													<code>{relativeHost(r.txtName)}</code>
+													<button
+														type="button"
+														class="copy-mini"
+														on:click={() => copyText(relativeHost(r.txtName))}
+													>Copy</button>
+												</td>
+												<td>
+													<code>{r.txtValue}</code>
+													<button type="button" class="copy-mini" on:click={() => copyText(r.txtValue)}>Copy</button>
+												</td>
+												<td>{t('ui.domain_note_https')}</td>
+											</tr>
+										{/each}
+									{/if}
+								</tbody>
+							</table>
+							<p class="dns-status">{t('ui.domain_https_wait')}</p>
+						{:else}
+							<p class="field-hint">{t('ui.domain_https_records_loading')}</p>
+						{/if}
+						<div class="capability-actions">
+							<button class="btn btn-primary" on:click={() => pollCert(false)} disabled={busy}>
+								{t('ui.domain_refresh_status')}
+							</button>
+							<button class="btn btn-secondary" on:click={() => pollCert(true)} disabled={busy}>
+								{t('ui.domain_wait_refresh')}
+							</button>
+						</div>
 					</div>
 				{/if}
 
@@ -539,7 +621,7 @@
 					<div class="domain-bound">
 						<div class="domain-bound-left">
 							<span class="domain-check">✓</span>
-							<span>Bound {activeHostname}</span>
+							<span>{t('ui.domain_bound_label')} {activeHostname}</span>
 							<a
 								class="domain-open"
 								href={`https://${activeHostname}/`}
@@ -549,18 +631,15 @@
 							>↗</a>
 						</div>
 						<button
-							class="action-button"
+							class="btn btn-secondary"
 							type="button"
 							on:click={revokeDomain}
 							disabled={busy}
 						>
-							Revoke
+							{t('ui.domain_revoke')}
 						</button>
 					</div>
-					<p class="field-hint">
-						Publish again so the site rebuilds with baseURL=/ and visitors use this hostname.
-					</p>
-					<button class="action-button" on:click={refresh} disabled={busy}>Check status</button>
+					<p class="field-hint">{t('ui.domain_done_hint')}</p>
 				{/if}
 			{/if}
 
@@ -572,13 +651,6 @@
 </div>
 
 <style>
-	.capability-sep {
-		flex-shrink: 0;
-		margin: 0 2px;
-		color: var(--text-muted);
-		font-weight: 400;
-	}
-
 	.capability-summary {
 		margin-left: auto;
 		font-size: 13px;
@@ -645,6 +717,20 @@
 		margin-bottom: 8px;
 	}
 
+	.dns-host-hint {
+		margin: 0 0 8px;
+		font-size: 11px;
+		line-height: 1.45;
+		color: var(--text-muted);
+	}
+
+	.dns-advanced-toggle {
+		display: block;
+		margin: 0 0 8px;
+		text-align: left;
+		opacity: 0.85;
+	}
+
 	.dns-table {
 		width: 100%;
 		border-collapse: collapse;
@@ -691,31 +777,9 @@
 	}
 
 	.dns-status {
-		margin: 8px 0 0;
+		margin: 8px 0;
 		font-size: 11px;
 		color: var(--text-muted);
-	}
-
-	.dns-row {
-		display: grid;
-		grid-template-columns: 88px 1fr auto;
-		gap: 6px;
-		align-items: center;
-		font-size: 11px;
-	}
-
-	.dns-label {
-		color: var(--text-muted);
-	}
-
-	.dns-value {
-		font-size: 11px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		background: var(--background-primary);
-		padding: 4px 6px;
-		border-radius: 3px;
 	}
 
 	.capability-actions {

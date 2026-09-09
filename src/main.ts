@@ -202,6 +202,7 @@ export default class FridayPlugin extends Plugin {
 		// Obsidian official deep link:
 		//   obsidian://mdfriday-publish?event=auth&ok=1
 		//   obsidian://mdfriday-publish?event=claim&status=ok
+		//   obsidian://mdfriday-publish?event=upgrade&status=ok&plan=personal
 		//   obsidian://mdfriday-publish?event=turnstile&token=…
 		this.registerObsidianProtocolHandler('mdfriday-publish', async (params) => {
 			const event = params.event || params.action;
@@ -209,11 +210,13 @@ export default class FridayPlugin extends Plugin {
 				this.resolveTurnstileToken(params.token);
 				return;
 			}
-			const claimOk =
-				(event === 'auth' && (params.ok === '1' || params.ok === 'true')) ||
-				(event === 'claim' &&
-					(params.status === 'ok' || params.ok === '1' || params.ok === 'true'));
-			if (claimOk) {
+			const statusOk =
+				params.status === 'ok' || params.ok === '1' || params.ok === 'true';
+			const accountRefreshOk =
+				(event === 'auth' && statusOk) ||
+				(event === 'claim' && statusOk) ||
+				(event === 'upgrade' && statusOk);
+			if (accountRefreshOk) {
 				const mgr = this.projectServiceManager;
 				if (mgr) {
 					const r = await mgr.refreshCloudflareAccount();
@@ -230,7 +233,7 @@ export default class FridayPlugin extends Plugin {
 						success: r.success,
 						plan: r.plan,
 						kind: r.kind,
-						source: 'claim',
+						source: event === 'upgrade' ? 'upgrade' : 'claim',
 					});
 				}
 			}
@@ -1806,14 +1809,16 @@ export default class FridayPlugin extends Plugin {
 		this.viewInitialized = false;
 	}
 
-	async openAccountInBrowser(): Promise<void> {
+	async openAccountInBrowser(opts?: { upgrade?: 'personal' }): Promise<void> {
 		const mgr = this.projectServiceManager;
 		if (!mgr) return;
 		const key =
 			this.settings.mdfKey || (await mgr.ensureMdfKey({ interactive: true }));
 		if (!key) return;
 		const base = resolveAccountBaseUrl(this.settings);
-		window.open(`${base}/?key=${encodeURIComponent(key)}`);
+		const q = new URLSearchParams({ key });
+		if (opts?.upgrade === 'personal') q.set('upgrade', 'personal');
+		window.open(`${base}/?${q.toString()}`);
 	}
 
 	async openCloudflareProjectsModal(): Promise<void> {

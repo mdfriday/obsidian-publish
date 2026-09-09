@@ -74,6 +74,7 @@
 	export let onContinueAuth: () => void;
 	export let onOpenAccount: () => void;
 	export let onDomainActive: (hostname: string) => void;
+	export let onDomainCleared: (() => void) | undefined = undefined;
 	export let onDismissResult: () => void;
 	export let onDismissAuthTip: () => void = () => {};
 	export let onSelectTarget: ((sourcePath: string) => void | Promise<void>) | undefined = undefined;
@@ -947,6 +948,7 @@
 											{plugin}
 											{projectName}
 											onDomainActive={onDomainActive}
+											onDomainCleared={onDomainCleared}
 											layout="embedded"
 										/>
 									</div>

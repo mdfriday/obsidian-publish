@@ -1055,6 +1055,37 @@
 		void saveFoundryConfig('baseURL', '/');
 	}
 
+	function onDomainCleared() {
+		void (async () => {
+			try {
+				const foundry = plugin.foundryPublishService;
+				const name = plugin.currentProjectName || projectName;
+				if (!foundry || !name) return;
+				const bind = await foundry.getCloudflareBinding({
+					workspacePath: plugin.absWorkspacePath,
+					projectName: name,
+				});
+				const siteId = bind.success ? bind.siteId : undefined;
+				const root = (
+					(bind.success && bind.publicBaseUrl) ||
+					plugin.settings.cloudflarePublicBaseUrl ||
+					''
+				).replace(/\/$/, '');
+				if (siteId && root) {
+					publishUrl = `${root}/s/${siteId}/`;
+					sitePath = `/s/${siteId}/`;
+					void persistLastPublishUrl(publishUrl);
+					void saveFoundryConfig('baseURL', sitePath);
+					return;
+				}
+			} catch (e) {
+				console.warn('[Site] onDomainCleared binding read failed', e);
+			}
+			publishUrl = '';
+			void persistLastPublishUrl('');
+		})();
+	}
+
 	async function loadThemeList() {
 		themesLoading = true;
 		try {
@@ -2525,6 +2556,7 @@
 	onContinueAuth={continueGuestKeySetup}
 	onOpenAccount={openAccountFromGrowth}
 	onDomainActive={onDomainActive}
+	onDomainCleared={onDomainCleared}
 	onDismissResult={dismissPanelResult}
 	onDismissAuthTip={dismissAuthTip}
 	onSelectTarget={selectPublishedTarget}

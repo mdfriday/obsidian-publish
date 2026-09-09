@@ -36,7 +36,7 @@ Plan: **pill in header** → Apple-style tier cards popover (not a third tab). F
 |------|----------|------------|-----|
 | **Guest** | First try | No account · unlimited sites/builds/exports · **5 MB** · CDN · Note/Wiki · clears next **UTC 00:00** · first Turnstile on mdfriday.com | Install plugin |
 | **Free** | Ongoing free publishing | Everything in Guest + **50 MB** · claim Guest same URL · account manage · clears **1st of each month** | Sign up free (`https://mdfriday.com/account/`) |
-| **Personal** ($5/mo) | Your domain & lasting sites | Everything in Free + **1 GB** · permanent retention · **1 custom domain + HTTPS** · **release history & rollback** | Upgrade to Personal |
+| **Personal** ($5/mo) | Your domain & lasting sites | Everything in Free + **1 GB** · permanent retention · **3 custom domains + HTTPS** · **release history & rollback** | Upgrade to Personal |
 
 Gates: custom domain + history/rollback = **Personal only**. Soft banners state storage/retention. Password stays Personal-aligned advanced.
 

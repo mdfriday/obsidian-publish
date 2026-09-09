@@ -86,9 +86,10 @@ export class DomainWizardModal extends Modal {
 		}
 
 		if (this.step === 'hostname') {
+			contentEl.createEl('h3', { text: 'Step 1 · Enter your domain' });
 			new Setting(contentEl)
-				.setName('Hostname')
-				.setDesc('e.g. www.example.com (no https://)')
+				.setName('Domain')
+				.setDesc('e.g. www.example.com — you need access to this domain’s DNS')
 				.addText((t) => {
 					t.setPlaceholder('www.example.com');
 					t.setValue(this.hostnameInput);
@@ -97,7 +98,7 @@ export class DomainWizardModal extends Modal {
 					});
 				});
 			new Setting(contentEl).addButton((btn) => {
-				btn.setButtonText('Continue');
+				btn.setButtonText('Next');
 				btn.setCta();
 				btn.setDisabled(this.busy);
 				btn.onClick(() => void this.submitHostname());
@@ -106,80 +107,78 @@ export class DomainWizardModal extends Modal {
 		}
 
 		if (this.step === 'dns') {
-			contentEl.createEl('h3', { text: '1. Ownership DNS' });
+			contentEl.createEl('h3', { text: 'Step 2 · Add DNS records' });
 			contentEl.createEl('p', {
-				text: 'Add these at your DNS provider, wait a minute, then Verify.',
+				text:
+					'Host field: do not include your root domain. If the panel already selected example.com, paste only the short Host — a full name becomes …example.com.example.com.',
+				cls: 'setting-item-description',
 			});
-			this.copyRow(contentEl, 'TXT host / name', this.txtName);
-			this.copyRow(contentEl, 'TXT value', this.txtValue);
 			this.copyRow(
 				contentEl,
-				'CNAME host',
+				'CNAME · Host',
 				this.hostnameLeaf(this.hostnameInput),
 			);
-			this.copyRow(contentEl, 'CNAME target', this.cnameTarget);
+			this.copyRow(
+				contentEl,
+				'CNAME · Value',
+				(this.cnameTarget || '').replace(/\.$/, ''),
+			);
+			if (this.txtName && this.txtValue) {
+				this.copyRow(contentEl, 'TXT · Host', this.relativeHost(this.txtName));
+				this.copyRow(contentEl, 'TXT · Value', this.txtValue);
+			}
 
-			new Setting(contentEl)
-				.addButton((btn) => {
-					btn.setButtonText('I added DNS — Verify ownership');
-					btn.setCta();
-					btn.setDisabled(this.busy);
-					btn.onClick(() => void this.runVerify());
-				});
+			new Setting(contentEl).addButton((btn) => {
+				btn.setButtonText("I've added them — verify");
+				btn.setCta();
+				btn.setDisabled(this.busy);
+				btn.onClick(() => void this.runVerify());
+			});
 			return;
 		}
 
 		if (this.step === 'ssl') {
-			contentEl.createEl('h3', { text: '2. SSL certificate (DCV)' });
+			contentEl.createEl('h3', { text: 'Step 3 · Turn on HTTPS' });
 			contentEl.createEl('p', {
 				text:
-					'Ownership is OK. For HTTPS, Cloudflare prefers a DCV CNAME (same name as ACME). ' +
-					'Do NOT keep ACME TXT on the same host if you use DCV CNAME — they conflict. ' +
-					`SSL: ${this.sslStatus || '—'} · cert: ${this.certStatus || 'provisioning'}`,
+					'Ownership looks good. Add the HTTPS record below (same Host rules). If you added a TXT on the same host earlier, remove that TXT and keep only this CNAME. Certificate usually finishes in a few minutes.',
+				cls: 'setting-item-description',
 			});
 
 			if (this.dcvCnames.length) {
-				contentEl.createEl('p', {
-					text: 'Recommended — delete any _acme-challenge TXT, then add this CNAME (Aliyun: host _acme-challenge.www):',
-				});
 				for (const d of this.dcvCnames) {
-					this.copyRow(contentEl, 'DCV CNAME name (FQDN)', d.cname);
+					this.copyRow(contentEl, 'CNAME · Host', this.relativeHost(d.cname));
 					this.copyRow(
 						contentEl,
-						'DCV CNAME host (Aliyun)',
-						this.relativeHost(d.cname),
+						'CNAME · Value',
+						d.cnameTarget.replace(/\.$/, ''),
 					);
-					this.copyRow(contentEl, 'DCV CNAME target', d.cnameTarget.replace(/\.$/, ''));
 				}
 			} else if (this.sslTxts.length) {
-				contentEl.createEl('p', {
-					text: 'Fallback — ACME TXT (only if no DCV CNAME is shown):',
-				});
 				this.sslTxts.forEach((r, i) => {
-					this.copyRow(contentEl, `ACME TXT name #${i + 1}`, r.txtName);
 					this.copyRow(
 						contentEl,
-						`ACME TXT host (Aliyun) #${i + 1}`,
+						`TXT · Host #${i + 1}`,
 						this.relativeHost(r.txtName),
 					);
-					this.copyRow(contentEl, `ACME TXT value #${i + 1}`, r.txtValue);
+					this.copyRow(contentEl, `TXT · Value #${i + 1}`, r.txtValue);
 				});
 			} else {
 				contentEl.createEl('p', {
-					text: 'No DCV records returned yet — click Refresh in a few seconds.',
+					text: 'Records not ready yet — tap Refresh status in a few seconds.',
 					cls: 'mod-warning',
 				});
 			}
 
 			new Setting(contentEl)
 				.addButton((btn) => {
-					btn.setButtonText('Refresh cert status');
+					btn.setButtonText('Refresh status');
 					btn.setCta();
 					btn.setDisabled(this.busy || !this.domainId);
 					btn.onClick(() => void this.pollCert(false));
 				})
 				.addButton((btn) => {
-					btn.setButtonText('Poll for 1 minute');
+					btn.setButtonText('Keep checking (about 1 min)');
 					btn.setDisabled(this.busy || !this.domainId);
 					btn.onClick(() => void this.pollCert(true));
 				});
@@ -188,10 +187,10 @@ export class DomainWizardModal extends Modal {
 
 		if (this.step === 'done') {
 			contentEl.createEl('p', {
-				text: `Domain active: https://${this.hostnameInput}/`,
+				text: `Bound ${this.hostnameInput}`,
 			});
 			contentEl.createEl('p', {
-				text: 'Publish again so the site rebuilds with baseURL=/ (correct CSS/asset paths). The access link after publish will be this hostname.',
+				text: 'Publish once more, then open your site on this domain.',
 				cls: 'setting-item-description',
 			});
 			new Setting(contentEl).addButton((btn) => {
@@ -283,6 +282,9 @@ export class DomainWizardModal extends Modal {
 			if (res.code === 'plan_required') {
 				this.statusMsg =
 					'Custom domains require Personal. Upgrade from Account or Settings.';
+			} else if (res.code === 'conflict' && res.details?.reason === 'bound_other_project') {
+				const title = String(res.details.boundProjectTitle || res.details.boundProjectId || '');
+				this.statusMsg = `This domain is bound to another site (“${title}”). Unbind it there first.`;
 			} else {
 				this.statusMsg = res.error || 'Failed to add domain';
 			}
@@ -290,10 +292,22 @@ export class DomainWizardModal extends Modal {
 			return;
 		}
 		this.domainId = res.id || null;
+		this.hostnameInput = res.hostname || host;
+		this.cnameTarget = res.cnameTarget || this.cnameTarget;
+		if (res.mode === 'rebind' || res.mode === 'already_bound' || res.activated) {
+			await this.onActivated();
+			return;
+		}
 		this.txtName = res.txtName || '';
 		this.txtValue = res.txtValue || '';
-		this.cnameTarget = res.cnameTarget || '';
-		this.hostnameInput = res.hostname || host;
+		const st = (res.status || '').toLowerCase();
+		if (res.mode === 'resume' && st && st !== 'pending' && st !== 'verifying') {
+			this.step = 'ssl';
+			this.statusMsg = '';
+			this.render();
+			await this.pollCert(false);
+			return;
+		}
 		this.step = 'dns';
 		this.statusMsg = '';
 		this.render();
@@ -321,8 +335,7 @@ export class DomainWizardModal extends Modal {
 		}
 		this.applySslHints(verified);
 		this.step = 'ssl';
-		this.statusMsg =
-			'Ownership verified. Add the SSL (ACME) records below, then Refresh.';
+		this.statusMsg = '';
 		this.render();
 		await this.pollCert(false);
 	}
@@ -361,14 +374,14 @@ export class DomainWizardModal extends Modal {
 					return;
 				}
 			}
-			this.statusMsg = `SSL: ${sync.sslStatus || 'pending'} · cert_status: ${sync.status || '—'}. Add ACME TXT below if still pending.`;
+			this.statusMsg = 'Certificate still provisioning…';
 			this.step = 'ssl';
 			this.render();
 			if (i < max - 1) await sleep(5000);
 		}
 		this.busy = false;
 		this.statusMsg =
-			'Still provisioning. Confirm ACME TXT is live (dig TXT _acme-challenge.…), wait 1–2 min, Refresh again.';
+			'Still working. Confirm the HTTPS DNS record is live, wait 1–2 min, then Refresh status.';
 		this.render();
 	}
 
@@ -384,7 +397,7 @@ export class DomainWizardModal extends Modal {
 		this.step = 'done';
 		this.statusMsg = '';
 		new Notice(
-			`Domain ${this.hostnameInput} is active — publish again (baseURL=/). Open https://${this.hostnameInput}/`,
+			`Bound ${this.hostnameInput} — publish once more, then open https://${this.hostnameInput}/`,
 			6000,
 		);
 		this.render();
