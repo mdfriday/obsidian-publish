@@ -1,5 +1,6 @@
 import {App, PluginSettingTab, Setting, Platform, Notice} from 'obsidian';
 import type FridayPlugin from './main';
+import { resolveAccountBaseUrl } from './cloudflare-env';
 
 /** Obsidian official protocol: obsidian://mdfriday-publish?... */
 export const OBSIDIAN_PROTOCOL_ACTION = 'mdfriday-publish';
@@ -188,9 +189,7 @@ export class FridaySettingTab extends PluginSettingTab {
 						new Notice('Could not create guest Key', 3000);
 						return;
 					}
-					const accountBase = (
-						this.plugin.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account'
-					).replace(/\/$/, '');
+					const accountBase = resolveAccountBaseUrl(this.plugin.settings);
 					const url = `${accountBase}/?key=${encodeURIComponent(key)}`;
 					window.open(url, '_blank');
 					new Notice(
@@ -239,9 +238,7 @@ export class FridaySettingTab extends PluginSettingTab {
 							new Notice('Could not create guest Key', 3000);
 							return;
 						}
-						const accountBase = (
-							this.plugin.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account'
-						).replace(/\/$/, '');
+						const accountBase = resolveAccountBaseUrl(this.plugin.settings);
 						const url = `${accountBase}/?key=${encodeURIComponent(key)}`;
 						window.open(url, '_blank');
 						new Notice('Sign in on Account if needed, then click Upgrade to Personal.', 6000);
@@ -276,10 +273,10 @@ export class FridaySettingTab extends PluginSettingTab {
 				)
 				.addDropdown((dropdown) => {
 					dropdown
-						.addOption('local', 'Local (127.0.0.1) — default for development')
-						.addOption('auto', 'Auto (local if running, else staging)')
-						.addOption('staging', 'Staging (fsky.top)')
-						.addOption('production', 'Production')
+						.addOption('staging', 'Staging (fsky.top) — default for builds')
+						.addOption('production', 'Production (mdfriday.com)')
+						.addOption('local', 'Local (127.0.0.1)')
+						.addOption('auto', 'Auto (local if :8787 up, else staging)')
 						.setValue(env)
 						.onChange(async (value: string) => {
 							this.plugin.settings.cloudflareEnv = value as

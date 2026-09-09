@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type FridayPlugin from '../../main';
+	import { resolveAccountBaseUrl } from '../../cloudflare-env';
 	import type { PublishMode, SelectionKind } from '../../types/publish-config';
 	import type { CatalogEntry } from '../../theme/types';
 	import { TFile, TFolder } from 'obsidian';
@@ -152,10 +153,7 @@
 			? 'published'
 			: 'unpublished') as 'published' | 'unpublished' | 'revoked';
 	$: previewLive = hasPreview && !!previewUrl && !isPreviewBuilding;
-	$: accountUrl = (plugin.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account').replace(
-		/\/$/,
-		'',
-	);
+	$: accountUrl = (plugin.cloudflareEnvEpoch, resolveAccountBaseUrl(plugin.settings));
 
 	$: if (sitePassword) passwordOn = true;
 

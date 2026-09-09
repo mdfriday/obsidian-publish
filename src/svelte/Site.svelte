@@ -19,6 +19,7 @@
 	import type { CatalogEntry } from "../theme/types";
 	import type { ProjectState, ProgressUpdate, PublishProgressUpdate } from "../types/events";
 	import { buildThemeConfigPatch } from "../theme/theme-config";
+	import { resolvePublicBaseUrl } from "../cloudflare-env";
 	import { DEFAULT_THEME_SLUGS, filterThemesForSelection } from "../utils/theme";
 	import {
 		buildFaithfulToProject,
@@ -733,9 +734,7 @@
 	function buildPublishUrl(resultUrl: string): string {
 		if (!resultUrl) return '';
 		if (/^https?:\/\//i.test(resultUrl)) return resultUrl;
-		const publicBase =
-			plugin.settings.cloudflarePublicBaseUrl || 'https://share.fsky.top';
-		const base = publicBase.replace(/\/$/, '');
+		const base = resolvePublicBaseUrl(plugin.settings);
 		const path = resultUrl.startsWith('/') ? resultUrl : `/${resultUrl}`;
 		return `${base}${path}`;
 	}
@@ -1518,9 +1517,8 @@
 			} else if (match.domainHostname && match.domainStatus === 'active') {
 				url = `https://${match.domainHostname.replace(/\/$/, '')}/`;
 			} else if (match.siteId) {
-				const publicBase =
-					plugin.settings.cloudflarePublicBaseUrl || 'https://share.fsky.top';
-				url = `${publicBase.replace(/\/$/, '')}/s/${match.siteId}/index.html`;
+				const publicBase = resolvePublicBaseUrl(plugin.settings);
+				url = `${publicBase}/s/${match.siteId}/index.html`;
 			}
 
 			if (!stillCurrent()) return;

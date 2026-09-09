@@ -31,9 +31,11 @@ import {resolveDefaultTheme, shouldUseInternalRenderer} from './utils/theme';
 import {buildThemeConfigPatch} from './theme/theme-config';
 import {joinPath, joinVaultPath} from './utils/common';
 import {
+	DEFAULT_CLOUDFLARE_ENV,
 	type CloudflareEnvMode,
 	type CloudflareEnvResolved,
 	endpointsForEnv,
+	resolveAccountBaseUrl,
 	resolveCloudflareEnv,
 } from './cloudflare-env';
 
@@ -106,12 +108,11 @@ const DEFAULT_SETTINGS: FridaySettings = {
 	mdfAccountEmail: null,
 	hasPublishedOnce: false,
 	pathConfigs: {},
-	/** Prefer local ControlPlane (`npm run local`) for development. */
-	cloudflareEnv: 'local',
+	cloudflareEnv: DEFAULT_CLOUDFLARE_ENV,
 	cloudflareResolvedEnv: null,
-	cloudflareApiBaseUrl: 'https://api.fsky.top',
-	cloudflarePublicBaseUrl: 'https://share.fsky.top',
-	cloudflareAccountBaseUrl: 'https://mdfriday.com/account',
+	cloudflareApiBaseUrl: '',
+	cloudflarePublicBaseUrl: '',
+	cloudflareAccountBaseUrl: '',
 }
 
 export const FRIDAY_ICON = 'dice-5';
@@ -164,6 +165,11 @@ export default class FridayPlugin extends Plugin {
 	 * (previous file) cannot overwrite the newer target's UI state.
 	 */
 	selectionEpoch: number = 0
+	/**
+	 * Bumped in applyCloudflareEnv so Svelte UIs re-read Account/API URLs
+	 * (settings field mutation alone does not trigger `$:`).
+	 */
+	cloudflareEnvEpoch: number = 0
 	
 	// Site.svelte component reference (for new event-driven architecture)
 	siteComponent?: any | null
@@ -1806,10 +1812,7 @@ export default class FridayPlugin extends Plugin {
 		const key =
 			this.settings.mdfKey || (await mgr.ensureMdfKey({ interactive: true }));
 		if (!key) return;
-		const base = (this.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account').replace(
-			/\/$/,
-			'',
-		);
+		const base = resolveAccountBaseUrl(this.settings);
 		window.open(`${base}/?key=${encodeURIComponent(key)}`);
 	}
 
@@ -1822,7 +1825,7 @@ export default class FridayPlugin extends Plugin {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 		this.previousDownloadServer = this.settings.downloadServer;
 		if (!this.settings.cloudflareEnv) {
-			this.settings.cloudflareEnv = 'auto';
+			this.settings.cloudflareEnv = DEFAULT_CLOUDFLARE_ENV;
 		}
 		if (!this.settings.pathConfigs) {
 			this.settings.pathConfigs = {};
@@ -1872,6 +1875,7 @@ export default class FridayPlugin extends Plugin {
 		this.settings.cloudflareApiBaseUrl = endpoints.apiBaseUrl;
 		this.settings.cloudflarePublicBaseUrl = endpoints.publicBaseUrl;
 		this.settings.cloudflareAccountBaseUrl = endpoints.accountBaseUrl;
+		this.cloudflareEnvEpoch += 1;
 
 		if (Platform.isDesktop && this.themeApiService) {
 			this.themeApiService.clearCache();

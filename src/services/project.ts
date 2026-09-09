@@ -10,10 +10,14 @@ import {
 	listVaultStaticFiles,
 	mergeMdfridayParams,
 } from '../theme/user-static-sync';
+import { CLOUDFLARE_ENV_PRESETS } from '../cloudflare-env';
 
 /** Share mode baseURL per arch/03-build-contract.md */
 export function computeShareBaseUrl(publicBaseUrl: string, siteId: string): string {
-	const base = (publicBaseUrl || 'https://share.fsky.top').replace(/\/$/, '');
+	const base = (publicBaseUrl || CLOUDFLARE_ENV_PRESETS.staging.publicBaseUrl).replace(
+		/\/$/,
+		'',
+	);
 	return `${base}/s/${siteId}/`;
 }
 
@@ -572,7 +576,8 @@ export class ProjectServiceManager {
 		}
 
 		const publicBaseUrl =
-			this.plugin.settings.cloudflarePublicBaseUrl || 'https://share.fsky.top';
+			this.plugin.settings.cloudflarePublicBaseUrl ||
+				CLOUDFLARE_ENV_PRESETS.staging.publicBaseUrl;
 
 		// New remote project only — republish of an already-bound site must not be blocked.
 		const existing = await foundry.getCloudflareBinding({

@@ -12,6 +12,8 @@ if you want to view the source, please visit the github repository of this plugi
 `
 
 const prod = process.argv[2] === 'production'
+// Ship default: staging. Override: MDF_CF_ENV=production npm run build
+const defaultCfEnv = process.env.MDF_CF_ENV || (prod ? 'staging' : 'local')
 // Change this to your local Obsidian plugin path for development
 const pluginDir = path.join(process.env.HOME || '', 'Desktop', 'obsidian-test', '.obsidian', 'plugins', 'mdfriday-publish');
 
@@ -107,6 +109,7 @@ const buildOptions = {
 	bundle: true,
 	define: {
 		'process.env.NODE_ENV': prod ? '"production"' : '"development"',
+		__MDF_DEFAULT_CF_ENV__: JSON.stringify(defaultCfEnv),
 		global: 'window',
 	},
 	external: externals,
@@ -143,7 +146,10 @@ buildOptions.loader['.css'] = 'css';
 if (prod) {
 	esbuild
 		.build(buildOptions)
-		.then(() => console.log('✓ Build completed successfully'))
+		.then(() => {
+		console.log('✓ Build completed successfully')
+		console.log(`  default Cloudflare env: ${defaultCfEnv}`)
+	})
 		.catch(() => process.exit(1));
 } else {
 	const context = await esbuild.context(buildOptions);

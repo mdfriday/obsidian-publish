@@ -1,6 +1,10 @@
 /**
  * Single place for Cloudflare env → API / Share / Account URLs.
- * Plugin settings only pick an environment mode; endpoints are derived here.
+ *
+ * - Edit `CLOUDFLARE_ENV_PRESETS` for hostnames.
+ * - Ship default comes from build (`npm run build` → staging).
+ * - Override at build time: `MDF_CF_ENV=production npm run build`
+ * - Runtime: Settings → Cloudflare environment (local | auto | staging | production).
  */
 
 import { requestUrl } from 'obsidian';
@@ -16,7 +20,18 @@ export interface CloudflareEndpoints {
   guestChallengeUrl: string;
 }
 
-/** Canonical presets — edit here, not in settings fields. */
+/** Injected by esbuild (`MDF_CF_ENV` or production→staging / watch→local). */
+declare const __MDF_DEFAULT_CF_ENV__: string | undefined;
+
+/**
+ * First-install / DEFAULT_SETTINGS env mode.
+ * Production builds default to staging; change via `MDF_CF_ENV=production npm run build`.
+ */
+export const DEFAULT_CLOUDFLARE_ENV: CloudflareEnvMode = normalizeEnvMode(
+  typeof __MDF_DEFAULT_CF_ENV__ === 'string' ? __MDF_DEFAULT_CF_ENV__ : 'staging',
+);
+
+/** Canonical presets — edit hosts here only. */
 export const CLOUDFLARE_ENV_PRESETS: Record<CloudflareEnvResolved, CloudflareEndpoints> = {
   local: {
     apiBaseUrl: 'http://127.0.0.1:8787',
@@ -40,6 +55,13 @@ export const CLOUDFLARE_ENV_PRESETS: Record<CloudflareEnvResolved, CloudflareEnd
 
 const LOCAL_HEALTH = `${CLOUDFLARE_ENV_PRESETS.local.apiBaseUrl}/v1/health`;
 
+function normalizeEnvMode(raw: string): CloudflareEnvMode {
+  if (raw === 'local' || raw === 'auto' || raw === 'staging' || raw === 'production') {
+    return raw;
+  }
+  return 'staging';
+}
+
 /**
  * Resolve env mode to a concrete environment.
  * `auto`: prefer local when `npm run local` health responds, else staging.
@@ -57,6 +79,70 @@ export async function resolveCloudflareEnv(
 
 export function endpointsForEnv(env: CloudflareEnvResolved): CloudflareEndpoints {
   return { ...CLOUDFLARE_ENV_PRESETS[env] };
+}
+
+/** Account base without trailing slash — always from presets when settings lag. */
+export function resolveAccountBaseUrl(settings: {
+  cloudflareAccountBaseUrl?: string;
+  cloudflareResolvedEnv?: CloudflareEnvResolved | null;
+  cloudflareEnv?: CloudflareEnvMode;
+}): string {
+  const fromSettings = settings.cloudflareAccountBaseUrl?.trim();
+  if (fromSettings && !isStaleLocalAccountUrl(fromSettings, settings)) {
+    return fromSettings.replace(/\/$/, '');
+  }
+  const resolved =
+    settings.cloudflareResolvedEnv ||
+    (settings.cloudflareEnv === 'local' ||
+    settings.cloudflareEnv === 'staging' ||
+    settings.cloudflareEnv === 'production'
+      ? settings.cloudflareEnv
+      : 'staging');
+  return endpointsForEnv(resolved).accountBaseUrl.replace(/\/$/, '');
+}
+
+/** Detect UI/settings stuck on localhost while env mode is remote. */
+function isStaleLocalAccountUrl(
+  url: string,
+  settings: { cloudflareEnv?: CloudflareEnvMode; cloudflareResolvedEnv?: CloudflareEnvResolved | null },
+): boolean {
+  const mode = settings.cloudflareResolvedEnv || settings.cloudflareEnv;
+  if (mode === 'local') return false;
+  return /127\.0\.0\.1|localhost/i.test(url);
+}
+
+export function resolveApiBaseUrl(settings: {
+  cloudflareApiBaseUrl?: string;
+  cloudflareResolvedEnv?: CloudflareEnvResolved | null;
+  cloudflareEnv?: CloudflareEnvMode;
+}): string {
+  const fromSettings = settings.cloudflareApiBaseUrl?.trim();
+  if (fromSettings) return fromSettings.replace(/\/$/, '');
+  const resolved =
+    settings.cloudflareResolvedEnv ||
+    (settings.cloudflareEnv === 'local' ||
+    settings.cloudflareEnv === 'staging' ||
+    settings.cloudflareEnv === 'production'
+      ? settings.cloudflareEnv
+      : 'staging');
+  return endpointsForEnv(resolved).apiBaseUrl.replace(/\/$/, '');
+}
+
+export function resolvePublicBaseUrl(settings: {
+  cloudflarePublicBaseUrl?: string;
+  cloudflareResolvedEnv?: CloudflareEnvResolved | null;
+  cloudflareEnv?: CloudflareEnvMode;
+}): string {
+  const fromSettings = settings.cloudflarePublicBaseUrl?.trim();
+  if (fromSettings) return fromSettings.replace(/\/$/, '');
+  const resolved =
+    settings.cloudflareResolvedEnv ||
+    (settings.cloudflareEnv === 'local' ||
+    settings.cloudflareEnv === 'staging' ||
+    settings.cloudflareEnv === 'production'
+      ? settings.cloudflareEnv
+      : 'staging');
+  return endpointsForEnv(resolved).publicBaseUrl.replace(/\/$/, '');
 }
 
 /** Use Obsidian requestUrl — browser fetch from app://obsidian.md is CORS-blocked. */

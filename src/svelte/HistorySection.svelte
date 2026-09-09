@@ -2,6 +2,7 @@
 	import { Notice } from 'obsidian';
 	import type FridayPlugin from '../main';
 	import { computeShareBaseUrl } from '../services/project';
+	import { resolvePublicBaseUrl } from '../cloudflare-env';
 
 	export let plugin: FridayPlugin;
 	export let projectName: string;
@@ -93,9 +94,9 @@
 		const siteId = opts.siteId;
 		if (siteId && opts.hostingMode !== 'custom') {
 			const root =
-				plugin.settings.cloudflarePublicBaseUrl ||
+				resolvePublicBaseUrl(plugin.settings) ||
 				opts.bindingPublicBaseUrl ||
-				'https://share.fsky.top';
+				'';
 			return `${computeShareBaseUrl(root, siteId).replace(/\/$/, '')}/index.html`;
 		}
 		const bindBase = (opts.bindingPublicBaseUrl || '').replace(/\/?$/, '');

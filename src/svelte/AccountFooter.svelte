@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type FridayPlugin from '../main';
+	import { resolveAccountBaseUrl } from '../cloudflare-env';
 
 	export let plugin: FridayPlugin;
 	export let onContinueAuth: () => void;
@@ -7,10 +8,10 @@
 
 	$: t = plugin.i18n?.t || ((key: string) => key);
 
-	$: kind = (plugin.settings.mdfKeyKind || '').toLowerCase();
-	$: plan = (plugin.settings.mdfKeyPlan || '').toLowerCase();
-	$: hasKey = !!plugin.settings.mdfKey;
-	$: email = (plugin.settings.mdfAccountEmail || '').trim();
+	$: kind = (plugin.cloudflareEnvEpoch, (plugin.settings.mdfKeyKind || '').toLowerCase());
+	$: plan = (plugin.cloudflareEnvEpoch, (plugin.settings.mdfKeyPlan || '').toLowerCase());
+	$: hasKey = (plugin.cloudflareEnvEpoch, !!plugin.settings.mdfKey);
+	$: email = (plugin.cloudflareEnvEpoch, (plugin.settings.mdfAccountEmail || '').trim());
 
 	$: accountState = (!hasKey
 		? 'guest_unverified'
@@ -24,10 +25,7 @@
 		| 'free'
 		| 'personal';
 
-	$: accountUrl = (plugin.settings.cloudflareAccountBaseUrl || 'https://mdfriday.com/account').replace(
-		/\/$/,
-		'',
-	);
+	$: accountUrl = (plugin.cloudflareEnvEpoch, resolveAccountBaseUrl(plugin.settings));
 
 	$: freeTitle = email
 		? t('ui.account_free_title', { email })
