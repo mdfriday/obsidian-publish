@@ -25,6 +25,11 @@ export interface CatalogEntry {
 	description?: string;
 	thumbnail?: string;
 	userAssets?: UserAssetSlot[];
+	/**
+	 * Resolved Site.Params from theme catalog (capabilities + overrides + customParams).
+	 * Written into config.json when the theme is applied.
+	 */
+	siteParams?: Record<string, unknown>;
 }
 
 /** @deprecated Use CatalogEntry */

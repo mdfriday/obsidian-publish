@@ -51,11 +51,17 @@ function authHeaders(plugin?: FridayPlugin): Record<string, string> {
 async function fetchPublicSnapshot(
 	cdnBase: string,
 ): Promise<PublicCatalogEntry[]> {
-	const url = `${cdnBase}/meta/theme-catalog.json`;
+	// Catalog objects use max-age=86400; Obsidian/Electron may serve a stale
+	// snapshot without siteParams. Bust with timestamp + no-cache headers.
+	const url = `${cdnBase}/meta/theme-catalog.json?_=${Date.now()}`;
 	const response = await requestUrl({
 		url,
 		method: 'GET',
-		headers: { Accept: 'application/json' },
+		headers: {
+			Accept: 'application/json',
+			'Cache-Control': 'no-cache',
+			Pragma: 'no-cache',
+		},
 	});
 	if (response.status !== 200) {
 		throw new Error(`Theme catalog snapshot unavailable (${response.status}): ${url}`);
@@ -70,12 +76,26 @@ async function fetchPublicSnapshot(
 async function fetchApiPackMap(
 	apiBase: string,
 	plugin?: FridayPlugin,
-): Promise<Map<string, { packUrl: string | null; entitled: boolean; lockReason: string | null }>> {
-	const url = `${apiBase}/v1/theme-catalog`;
+): Promise<
+	Map<
+		string,
+		{
+			packUrl: string | null;
+			entitled: boolean;
+			lockReason: string | null;
+			siteParams?: Record<string, unknown>;
+		}
+	>
+> {
+	const url = `${apiBase}/v1/theme-catalog?_=${Date.now()}`;
 	const response = await requestUrl({
 		url,
 		method: 'GET',
-		headers: authHeaders(plugin),
+		headers: {
+			...authHeaders(plugin),
+			'Cache-Control': 'no-cache',
+			Pragma: 'no-cache',
+		},
 	});
 	if (response.status !== 200) {
 		return new Map();
@@ -83,13 +103,19 @@ async function fetchApiPackMap(
 	const body = response.json as { entries?: ApiCatalogEntry[] };
 	const map = new Map<
 		string,
-		{ packUrl: string | null; entitled: boolean; lockReason: string | null }
+		{
+			packUrl: string | null;
+			entitled: boolean;
+			lockReason: string | null;
+			siteParams?: Record<string, unknown>;
+		}
 	>();
 	for (const entry of body.entries ?? []) {
 		map.set(entry.slug, {
 			packUrl: entry.packUrl ?? null,
 			entitled: entry.entitled !== false,
 			lockReason: entry.lockReason ?? null,
+			siteParams: entry.siteParams,
 		});
 	}
 	return map;
@@ -158,6 +184,14 @@ async function fetchCatalog(plugin?: FridayPlugin): Promise<CatalogEntry[]> {
 			merged.lockReason = (api.lockReason as CatalogEntry['lockReason']) ?? null;
 			if (api.entitled && api.packUrl) {
 				merged.packUrl = api.packUrl;
+			}
+			// Prefer CDN siteParams; fall back to API if snapshot was stale/missing.
+			if (
+				(!merged.siteParams || Object.keys(merged.siteParams).length === 0) &&
+				api.siteParams &&
+				Object.keys(api.siteParams).length > 0
+			) {
+				merged.siteParams = api.siteParams;
 			}
 		}
 		return merged;

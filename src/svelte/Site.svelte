@@ -47,6 +47,16 @@
 	const isWindows = process.platform === 'win32';
 	const FRIDAY_ROOT_FOLDER = 'MDFriday';
 
+	/** True when catalog siteParams are not yet reflected in project config.params. */
+	function configMissingSiteParams(
+		params: Record<string, unknown> | undefined,
+		siteParams: Record<string, unknown> | undefined,
+	): boolean {
+		if (!siteParams || Object.keys(siteParams).length === 0) return false;
+		const p = params ?? {};
+		return Object.keys(siteParams).some((key) => !(key in p));
+	}
+
 	// State variables
 	let basePath = plugin.pluginDir;
 	let absSelectedFolderPath = [];
@@ -305,9 +315,8 @@
 				if (actualKey === 'theme') {
 					const patch = actualValue as ReturnType<typeof buildThemeConfigPatch>;
 					await plugin.handleSiteEvent('configChanged', { key: 'module', value: patch.module });
-					const existingConfig = await plugin.getFoundryProjectConfigMap(plugin.currentProjectName);
-					const params = { ...(existingConfig['params'] || {}), ...patch.params };
-					await plugin.handleSiteEvent('configChanged', { key: 'params', value: params });
+					// patch.params is already merged (siteParams + preserved user keys)
+					await plugin.handleSiteEvent('configChanged', { key: 'params', value: patch.params });
 				} else {
 					await plugin.handleSiteEvent('configChanged', {
 						key: actualKey,
@@ -326,7 +335,12 @@
 			console.warn('[Site] Cannot apply locked theme:', entry.slug);
 			return;
 		}
-		await saveFoundryConfig('theme.catalog', buildThemeConfigPatch(entry));
+		const existingConfig = await plugin.getFoundryProjectConfigMap(plugin.currentProjectName);
+		const existingParams = (existingConfig?.['params'] ?? {}) as Record<string, unknown>;
+		await saveFoundryConfig(
+			'theme.catalog',
+			buildThemeConfigPatch(entry, undefined, existingParams),
+		);
 		if (plugin.projectServiceManager && projectName) {
 			await plugin.projectServiceManager.syncUserStaticConfig(projectName, entry);
 		}
@@ -403,6 +417,15 @@
 				currentThemeWithSample = matchedTheme;
 				if (state.config.markdown?.useInternalRenderer === undefined) {
 					await saveFoundryConfig('markdown.useInternalRenderer', true);
+				}
+				// Existing projects created before siteParams: backfill on open.
+				if (
+					configMissingSiteParams(
+						state.config.params as Record<string, unknown> | undefined,
+						matchedTheme.siteParams,
+					)
+				) {
+					await applyThemeFromCatalog(matchedTheme);
 				}
 				// Do not force themed mode here — note default is faithful;
 				// pathConfigs hydrate decides mode after selection is ready.
