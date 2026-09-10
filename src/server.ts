@@ -1,10 +1,11 @@
-import {ItemView, WorkspaceLeaf, TFile, TFolder} from 'obsidian';
+import {ItemView, WorkspaceLeaf} from 'obsidian';
+import {mount, unmount} from 'svelte';
 import FridayPlugin, {FRIDAY_ICON, FRIDAY_SERVER_VIEW_TYPE} from "./main";
 import Server from './svelte/Server.svelte';
 
 export default class ServerView extends ItemView {
 	plugin: FridayPlugin;
-	private _app: Server | null = null;
+	private _app: ReturnType<typeof mount> | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: FridayPlugin) {
 		super(leaf);
@@ -15,14 +16,14 @@ export default class ServerView extends ItemView {
 	// 关闭时销毁 Svelte 实例
 	async onClose() {
 		if (this._app) {
-			this._app.$destroy();
+			void unmount(this._app);
 			this._app = null;
 		}
 	}
 
 	// 打开时初始化 Svelte 实例并传入 props
 	async onOpen(): Promise<void> {
-		this._app = new Server({
+		this._app = mount(Server, {
 			target: this.contentEl,
 			props: {
 				app: this.app,
@@ -32,7 +33,7 @@ export default class ServerView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Friday Service";
+		return "Friday service";
 	}
 
 	getViewType(): string {

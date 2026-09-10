@@ -59,23 +59,25 @@ export const DEFAULT_LANGUAGE: LanguageCode = 'en';
 export function detectLanguage(app: App): LanguageCode {
 	// 1. Try to get Obsidian's language setting
 	try {
-		// @ts-ignore - Obsidian internal API
-		let obsidianLang = app.vault?.config?.lang;
-		
-		// Try alternative paths if first method fails
-		if (!obsidianLang) {
-			// @ts-ignore - Obsidian internal API  
-			obsidianLang = app.vault?.config?.language;
+		const vaultConfig = (app.vault as App['vault'] & {
+			config?: { lang?: string; language?: string };
+		}).config;
+
+		let obsidianLang: string | undefined = vaultConfig?.lang ?? vaultConfig?.language;
+
+		if (!obsidianLang && typeof window !== 'undefined') {
+			const momentLocale = (window as Window & {
+				moment?: { locale?: () => string };
+			}).moment?.locale?.();
+			if (typeof momentLocale === 'string') {
+				obsidianLang = momentLocale;
+			}
 		}
-		
-		if (!obsidianLang && typeof window !== 'undefined' && (window as any).moment) {
-			obsidianLang = (window as any).moment.locale();
-		}
-		
+
 		if (!obsidianLang && document.documentElement.lang) {
 			obsidianLang = document.documentElement.lang;
 		}
-		
+
 		if (obsidianLang) {
 			const normalized = normalizeLanguageCode(obsidianLang);
 			if (normalized && isValidLanguageCode(normalized)) {
@@ -208,20 +210,24 @@ export function getLanguageInfo(code: LanguageCode): LanguageInfo | undefined {
  * Simple template replacement for translations with parameters
  * Supports {{param}} syntax
  */
-export function interpolateTemplate(template: string, params?: Record<string, any>): string {
+export function interpolateTemplate(template: string, params?: Record<string, unknown>): string {
 	if (!params) return template;
 
-	return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-		return params[key] !== undefined ? String(params[key]) : match;
+	return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
+		const value = params[key];
+		return value !== undefined ? String(value) : match;
 	});
 }
 
 /**
  * Get nested translation value by dot-notation key
  */
-export function getNestedValue(obj: any, path: string): any {
-	return path.split('.').reduce((current, key) => {
-		return current && current[key] !== undefined ? current[key] : undefined;
+export function getNestedValue(obj: unknown, path: string): unknown {
+	return path.split('.').reduce<unknown>((current, key) => {
+		if (current !== null && typeof current === 'object' && key in current) {
+			return (current as Record<string, unknown>)[key];
+		}
+		return undefined;
 	}, obj);
 }
 

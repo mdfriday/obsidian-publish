@@ -42,7 +42,7 @@ export type TranslationNamespace = {
  */
 export type TranslationFunction = (
 	key: string,
-	params?: Record<string, string | number | unknown>,
+	params?: Record<string, string | number>,
 ) => string;
 
 /**

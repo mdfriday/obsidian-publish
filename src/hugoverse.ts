@@ -1,4 +1,4 @@
-import {App, FileSystemAdapter, Notice, Platform, requestUrl, TFile, TFolder, Vault} from "obsidian";
+import {App, FileSystemAdapter, Platform, requestUrl} from "obsidian";
 import type {RequestUrlResponse} from "obsidian";
 import type FridayPlugin from "./main";
 
@@ -40,13 +40,14 @@ export class Hugoverse {
 	}
 
 	/**
-	 * 从浏览器缓存获取或生成 request_id
+	 * 从 vault-isolated storage 获取或生成 request_id
 	 */
 	private getOrCreateRequestId(): string {
-		let requestId = localStorage.getItem(COUNTER_REQUEST_ID_KEY);
+		const stored: unknown = this.app.loadLocalStorage(COUNTER_REQUEST_ID_KEY);
+		let requestId = typeof stored === 'string' ? stored : null;
 		if (!requestId) {
 			requestId = this.generateUUID();
-			localStorage.setItem(COUNTER_REQUEST_ID_KEY, requestId);
+			this.app.saveLocalStorage(COUNTER_REQUEST_ID_KEY, requestId);
 		}
 		return requestId;
 	}
@@ -134,7 +135,7 @@ export class Hugoverse {
 
 			return true;
 		} catch (error) {
-			console.warn("Failed to send counter:", error.toString());
+			console.warn("Failed to send counter:", String(error));
 			return false;
 		}
 	}

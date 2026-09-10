@@ -1,10 +1,15 @@
 import {FileSystemAdapter, MarkdownView, Menu, Notice, Platform, Plugin, setIcon, TAbstractFile, TFile, TFolder} from 'obsidian';
+import * as path from 'path';
 import {I18nService} from "./i18n";
 import {FridaySettingTab} from "./setting";
 // Foundry PC 专用服务类型
 import type {
+	ObsidianAuthService,
 	ObsidianBuildService,
 	ObsidianDomainService,
+	ObsidianFolderStructureInfo,
+	ObsidianGlobalConfigService,
+	ObsidianLicenseService,
 	ObsidianProjectInfo,
 	ObsidianProjectService,
 	ObsidianPublishService,
@@ -23,7 +28,7 @@ import {
 	projectPrimaryVaultPath,
 	remapPathAfterRename,
 } from './services/project-path';
-import type {ProjectState, SiteEventData, SiteEventType} from './types/events';
+import type {ProgressUpdate, ProjectState, PublishProgressUpdate, SiteEventData, SiteEventType} from './types/events';
 import {normalizePublishMethod} from './types/publish';
 import {resolveDefaultTheme, shouldUseInternalRenderer} from './utils/theme';
 import {buildThemeConfigPatch} from './theme/theme-config';
@@ -38,6 +43,42 @@ import {
 // PC-only module types (dynamically imported)
 import type {Hugoverse} from "./hugoverse";
 import type {Site} from "./site";
+
+/** Factories not exported as classes — infer service instance types. */
+type FoundryModule = typeof import('@mdfriday/foundry');
+type ObsidianWorkspaceService = ReturnType<FoundryModule['createObsidianWorkspaceService']>;
+type ObsidianProjectConfigService = ReturnType<FoundryModule['createObsidianProjectConfigService']>;
+
+/** Site.svelte handle registered via registerSiteComponent. */
+export interface SiteComponentHandle {
+	initialize?: (projectState: ProjectState, epoch?: number) => void | Promise<void>;
+	updateBuildProgress?: (progress: ProgressUpdate) => void;
+	updatePublishProgress?: (progress: PublishProgressUpdate | Record<string, unknown>) => void;
+	onBuildComplete?: (result: unknown) => void;
+	onBuildError?: (error: unknown) => void;
+	onPreviewStarted?: (result: unknown) => void;
+	onPreviewError?: (error: unknown) => void;
+	onPreviewStopped?: () => void;
+	onPublishComplete?: (result: { url?: string; baseURL?: string; [key: string]: unknown }) => void;
+	onPublishError?: (error: unknown, code?: unknown) => void;
+	onAccountUpdated?: (info?: {
+		success?: boolean;
+		plan?: string;
+		kind?: string;
+		source?: string;
+	}) => void;
+	onConnectionTestSuccess?: (message: unknown) => void;
+	onConnectionTestError?: (error: unknown) => void;
+	setSitePath?: (path: string) => void;
+	startPreviewAndWait?: () => Promise<boolean>;
+	startPublish?: () => Promise<void>;
+	applyDefaultsAndPublish?: () => Promise<void>;
+	clearAllContent?: () => void;
+	followSelection?: (folder: TFolder | null, file: TFile | null) => void;
+	notifyTargetsChanged?: () => void;
+	openAccountFromGrowth?: () => void | Promise<void>;
+	enableAutoPublish?: () => void;
+}
 
 // Export view type for dynamic import
 export const FRIDAY_SERVER_VIEW_TYPE = 'Friday_Service';
@@ -69,12 +110,12 @@ interface FridaySettings {
 	 * Never stores password plaintext — submitted only at publish time.
 	 */
 	pathConfigs: Record<string, import('./types/publish-config').PathPublishConfig>;
-	/** @deprecated migrated to mdfKey */
+	/** Migrated to mdfKey — still read for one-shot data.json migration */
 	cloudflareGuestToken?: string | null;
-	/** @deprecated migrated away — JWT not stored in plugin */
+	/** Migrated away — JWT not stored in plugin */
 	cloudflareUserToken?: string | null;
 	/**
-	 * @deprecated compile-time DEFAULT_CLOUDFLARE_ENV always wins; kept for data.json compat.
+	 * Compile-time DEFAULT_CLOUDFLARE_ENV always wins; kept for data.json compat.
 	 */
 	cloudflareEnv?: string;
 	/** Last applied compile-time env */
@@ -136,16 +177,16 @@ export default class FridayPlugin extends Plugin {
 	// PC-only services (optional, only loaded on desktop)
 	hugoverse?: Hugoverse
 	site?: Site
-	workspaceService?: any // Foundry service, type inferred at runtime
+	workspaceService?: ObsidianWorkspaceService
 	// Foundry services
 	foundryProjectService?: ObsidianProjectService | null
 	foundryBuildService?: ObsidianBuildService | null
-	foundryGlobalConfigService?: any // Type inferred at runtime
-	foundryProjectConfigService?: any // Type inferred at runtime
+	foundryGlobalConfigService?: ObsidianGlobalConfigService | null
+	foundryProjectConfigService?: ObsidianProjectConfigService | null
 	foundryServeService?: ObsidianServeService | null
 	foundryPublishService?: ObsidianPublishService | null
-	foundryAuthService?: any // Type inferred at runtime
-	foundryLicenseService?: any // Type inferred at runtime
+	foundryAuthService?: ObsidianAuthService | null
+	foundryLicenseService?: ObsidianLicenseService | null
 	foundryDomainService?: ObsidianDomainService | null
 	projectServiceManager?: ProjectServiceManager | null
 	// License state manager (unified license state from Foundry)
@@ -164,7 +205,7 @@ export default class FridayPlugin extends Plugin {
 	cloudflareEnvEpoch: number = 0
 	
 	// Site.svelte component reference (for new event-driven architecture)
-	siteComponent?: any | null
+	siteComponent?: SiteComponentHandle
 	
 	// Project initialization flag (prevents auto-save during new project creation)
 	isProjectInitializing: boolean = false
@@ -300,7 +341,7 @@ export default class FridayPlugin extends Plugin {
 		
 		try {
 			this.registerView(FRIDAY_SERVER_VIEW_TYPE, leaf => new ServerView(leaf, this));
-		} catch (e) {
+		} catch (_e) {
 			console.error('[Friday] View already registered, skipping');
 		}
 		
@@ -780,7 +821,7 @@ export default class FridayPlugin extends Plugin {
 	 * Register Site.svelte component for direct method calls
 	 * Part of new event-driven architecture
 	 */
-	registerSiteComponent(component: any) {
+	registerSiteComponent(component: SiteComponentHandle) {
 		this.siteComponent = component;
 	}
 
@@ -855,7 +896,7 @@ export default class FridayPlugin extends Plugin {
 		}
 
 		// Create progress callback
-		const onProgress = (progress: any) => {
+		const onProgress = (progress: ProgressUpdate) => {
 			// Send progress updates to Site component
 			this.siteComponent?.updateBuildProgress?.(progress);
 		};
@@ -880,7 +921,7 @@ export default class FridayPlugin extends Plugin {
 
 		const { projectName, port, renderer, publishConfig } = data;
 
-		const onProgress = (progress: any) => {
+		const onProgress = (progress: ProgressUpdate) => {
 			if (
 				publishConfig &&
 				(progress.phase === 'publishing' || progress.phase === 'publish-success')
@@ -931,9 +972,12 @@ export default class FridayPlugin extends Plugin {
 			return;
 		}
 
-		const onProgress = (progress: any) => {
+		const onProgress = (progress: ProgressUpdate | PublishProgressUpdate) => {
 			// Single progress bar under Publish button owns the whole pipeline
-			if (progress.phase === 'building' || progress.phase === 'build-success') {
+			if (
+				'phase' in progress &&
+				(progress.phase === 'building' || progress.phase === 'build-success')
+			) {
 				this.siteComponent?.updateBuildProgress?.(progress);
 				if (this.siteComponent?.updatePublishProgress) {
 					const pct =
@@ -974,7 +1018,7 @@ export default class FridayPlugin extends Plugin {
 		const { projectName, method, config } = data;
 
 		// Create progress callback
-		const onProgress = (progress: any) => {
+		const onProgress = (progress: PublishProgressUpdate) => {
 			// Send progress updates to Site component
 			this.siteComponent?.updatePublishProgress?.(progress);
 		};
@@ -1060,7 +1104,7 @@ export default class FridayPlugin extends Plugin {
 	 * @param file - Selected file (if file project)
 	 * @returns Complete initial configuration
 	 */
-	private async collectInitialConfig(projectName: string, folder: TFolder | null, file: TFile | null): Promise<Record<string, any>> {
+	private async collectInitialConfig(projectName: string, folder: TFolder | null, file: TFile | null): Promise<Record<string, unknown>> {
 		const publishMethod = normalizePublishMethod();
 		
 		// Determine if this is a folder project
@@ -1073,7 +1117,7 @@ export default class FridayPlugin extends Plugin {
 		const baseURL = '/';
 		
 		// Build complete configuration
-		const config: Record<string, any> = {
+		const config: Record<string, unknown> = {
 			// Basic settings
 			baseURL,
 			title: projectName,
@@ -1114,7 +1158,6 @@ export default class FridayPlugin extends Plugin {
 		// Scan folder structure if this is a folder project
 		if (folder && this.projectServiceManager && this.vaultBasePath) {
 			try {
-				const path = require('path');
 				const absoluteFolderPath = path.join(this.vaultBasePath, folder.path);
 				
 				const scanResult = await this.projectServiceManager.scanFolderStructure(absoluteFolderPath);
@@ -1148,12 +1191,11 @@ export default class FridayPlugin extends Plugin {
 	}
 
 	/**
-	 * 从文件夹路径获取 TFolder 对象
+	 * 从文件夹路径获取 vault-relative 路径
 	 */
-	private getVaultRelativePath(absolutePath: string): string {
+	getVaultRelativePath(absolutePath: string): string {
 		if (this.vaultBasePath) {
 			// Use path.relative to get the relative path
-			const path = require('path');
 			const relativePath = path.relative(this.vaultBasePath, absolutePath);
 			
 			// Convert Windows backslashes to forward slashes (Obsidian convention)
@@ -1181,8 +1223,8 @@ export default class FridayPlugin extends Plugin {
 	/**
 	 * 从扫描结果生成 languages 配置
 	 */
-	private generateLanguagesConfig(scanResult: any): Record<string, any> {
-		const languages: Record<string, any> = {};
+	private generateLanguagesConfig(scanResult: ObsidianFolderStructureInfo): Record<string, unknown> {
+		const languages: Record<string, unknown> = {};
 
 		if (scanResult.isStructured && scanResult.contentFolders.length > 0) {
 			// 多语言结构：根据扫描结果生成配置
@@ -1208,7 +1250,6 @@ export default class FridayPlugin extends Plugin {
 	 * 例如: /path/to/vault/myfolder/content.zh -> content.zh
 	 */
 	private extractContentDirName(absolutePath: string): string {
-		const path = require('path');
 		return path.basename(absolutePath);
 	}
 
@@ -1383,7 +1424,7 @@ export default class FridayPlugin extends Plugin {
 	/**
 	 * Get Foundry project config as a map
 	 */
-	async getFoundryProjectConfigMap(projectName: string): Promise<Record<string, any>> {
+	async getFoundryProjectConfigMap(projectName: string): Promise<Record<string, unknown>> {
 		if (!this.foundryProjectConfigService) {
 			return {};
 		}
@@ -1438,25 +1479,25 @@ export default class FridayPlugin extends Plugin {
 		}
 
 		// Create the internet icon button
-		const iconEl = document.createElement('a');
+		const iconEl = createEl('a');
 		iconEl.className = 'clickable-icon view-action friday-internet-icon';
 		iconEl.setAttribute('aria-label', this.i18n.t('menu.publish_options'));
 		setIcon(iconEl, 'globe');
 
 		// Add click handler to show publish menu
-		iconEl.addEventListener('click', async (e) => {
+		iconEl.addEventListener('click', (e) => {
 			e.preventDefault();
-			
+
 			const file = view.file;
 			if (!file) {
 				console.warn("[Friday] No file found in view");
 				return;
 			}
-			
+
 			// Create a menu — single Publish to MDFriday entry
 			const menu = new Menu();
 			this.addPublishMenuItems(menu, file);
-			menu.showAtMouseEvent(e as MouseEvent);
+			menu.showAtMouseEvent(e);
 		});
 
 		// Insert at the beginning of view-actions (left side)
@@ -1489,8 +1530,8 @@ export default class FridayPlugin extends Plugin {
 				await this.openPublishPanel(fileOrFolder, null);
 			}
 
-			await new Promise(resolve => setTimeout(resolve, 500));
-			await new Promise(resolve => setTimeout(resolve, 100));
+			await new Promise(resolve => window.setTimeout(resolve, 500));
+			await new Promise(resolve => window.setTimeout(resolve, 100));
 
 			if (this.siteComponent?.applyDefaultsAndPublish) {
 				await this.siteComponent.applyDefaultsAndPublish();
@@ -1526,13 +1567,13 @@ export default class FridayPlugin extends Plugin {
 			}
 
 			await this.openPublishPanel(null, file);
-			await new Promise(resolve => setTimeout(resolve, 500));
+			await new Promise(resolve => window.setTimeout(resolve, 500));
 
 			if (this.siteComponent?.setSitePath) {
 				this.siteComponent.setSitePath('/');
 			}
 
-			await new Promise(resolve => setTimeout(resolve, 100));
+			await new Promise(resolve => window.setTimeout(resolve, 100));
 
 			if (this.siteComponent?.startPreviewAndWait) {
 				const previewSuccess = await this.siteComponent.startPreviewAndWait();
@@ -1578,7 +1619,7 @@ export default class FridayPlugin extends Plugin {
 		const contents = this.site?.getCurrentContents?.() ?? [];
 		const current = contents[0];
 		const currentPath = current?.folder?.path ?? current?.file?.path;
-		if (currentPath && (pathsEqual(currentPath, oldPath) || normalizeVaultPath(currentPath)?.startsWith(normalizeVaultPath(oldPath)! + '/'))) {
+		if (currentPath && (pathsEqual(currentPath, oldPath) || normalizeVaultPath(currentPath)?.startsWith(normalizeVaultPath(oldPath) + '/'))) {
 			if (file instanceof TFile && file.extension === 'md') {
 				this.site.replaceSelection(null, file);
 			} else if (file instanceof TFolder) {
@@ -1592,7 +1633,7 @@ export default class FridayPlugin extends Plugin {
 		if (!matched && this.foundryProjectService && this.absWorkspacePath) {
 			try {
 				const listed = await this.foundryProjectService.listProjects(this.absWorkspacePath);
-				const oldN = normalizeVaultPath(oldPath)!;
+				const oldN = normalizeVaultPath(oldPath);
 				projectsToRemap = (listed.data || []).filter((p) => {
 					const primary = projectPrimaryVaultPath(this, p);
 					return primary === oldN || (primary?.startsWith(oldN + '/') ?? false);
@@ -1652,7 +1693,7 @@ export default class FridayPlugin extends Plugin {
 			return;
 		}
 		
-		this.activateView();
+		void this.activateView();
 		this.viewInitialized = true;
 	}
 
@@ -1702,11 +1743,8 @@ export default class FridayPlugin extends Plugin {
 		return this.app.workspace.getLeavesOfType(FRIDAY_SERVER_VIEW_TYPE);
 	}
 
-	async onunload() {
-		// Clean up Friday Service views
-		this.app.workspace.detachLeavesOfType(FRIDAY_SERVER_VIEW_TYPE);
-		
-		// Reset view initialization state
+	onunload() {
+		// Do not detach leaves — Obsidian restores leaf location; detaching resets it.
 		this.viewInitialized = false;
 	}
 
@@ -1723,7 +1761,7 @@ export default class FridayPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()) as FridaySettings;
 		// Compile-time env always wins — ignore persisted cloudflareEnv / auto.
 		this.settings.cloudflareEnv = DEFAULT_CLOUDFLARE_ENV;
 		if (!this.settings.downloadServer) {
@@ -1782,7 +1820,7 @@ export default class FridayPlugin extends Plugin {
 
 		if (this.turnstileWaiter) {
 			this.turnstileWaiter.reject(new Error('Turnstile challenge superseded'));
-			clearTimeout(this.turnstileWaiter.timer);
+			window.clearTimeout(this.turnstileWaiter.timer);
 			this.turnstileWaiter = null;
 		}
 
@@ -1790,7 +1828,7 @@ export default class FridayPlugin extends Plugin {
 		window.open(challengeUrl, '_blank');
 
 		return new Promise<string>((resolve, reject) => {
-			const timer = setTimeout(() => {
+			const timer = window.setTimeout(() => {
 				this.turnstileWaiter = null;
 				reject(new Error('Turnstile challenge timed out — open Account / try again'));
 			}, timeoutMs);
@@ -1800,10 +1838,10 @@ export default class FridayPlugin extends Plugin {
 
 	resolveTurnstileToken(token: string): void {
 		if (!this.turnstileWaiter) {
-			new Notice('Received Turnstile token (no pending challenge). Try publish again.', 4000);
+			new Notice('Received turnstile token (no pending challenge). Try publish again.', 4000);
 			return;
 		}
-		clearTimeout(this.turnstileWaiter.timer);
+		window.clearTimeout(this.turnstileWaiter.timer);
 		const { resolve } = this.turnstileWaiter;
 		this.turnstileWaiter = null;
 		resolve(token);
@@ -1848,8 +1886,14 @@ export default class FridayPlugin extends Plugin {
 				return;
 			}
 			
-			const foundryConfig = listResult.data.config;
-			const downloadServer = foundryConfig['site']?.downloadServer;
+			const foundryConfig = listResult.data.config as Record<string, unknown>;
+			const siteConfig = foundryConfig['site'];
+			const downloadServer =
+				siteConfig &&
+				typeof siteConfig === 'object' &&
+				'downloadServer' in siteConfig
+					? (siteConfig as { downloadServer?: unknown }).downloadServer
+					: undefined;
 			if (downloadServer === 'global' || downloadServer === 'east') {
 				this.settings.downloadServer = downloadServer;
 			}

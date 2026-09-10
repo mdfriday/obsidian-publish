@@ -1,6 +1,7 @@
 import type FridayPlugin from '../main';
 import {Notice, requestUrl} from 'obsidian';
 import type {TFile, TFolder} from 'obsidian';
+import type {ObsidianProjectCreateOptions} from '@mdfriday/foundry';
 import type {ProgressUpdate, PublishProgressUpdate} from '../types/events';
 import {joinPath} from '../utils/common';
 import type {CatalogEntry} from '../theme/types';
@@ -57,7 +58,7 @@ export class ProjectServiceManager {
 		name: string;
 		folder: TFolder | null;
 		file: TFile | null;
-		initialConfig?: Record<string, any>;
+		initialConfig?: Record<string, unknown>;
 	}): Promise<ProjectResult> {
 		const { name, folder, file, initialConfig } = options;
 
@@ -68,7 +69,7 @@ export class ProjectServiceManager {
 				return { success: false, error: 'Vault base path not available' };
 			}
 
-			const createOptions: any = {
+			const createOptions: ObsidianProjectCreateOptions = {
 				name,
 				workspacePath: this.plugin.absWorkspacePath,
 			};
@@ -192,7 +193,7 @@ export class ProjectServiceManager {
 	/**
 	 * 获取项目配置
 	 */
-	async getConfig(projectName: string): Promise<Record<string, any>> {
+	async getConfig(projectName: string): Promise<Record<string, unknown>> {
 		try {
 			const result = await this.plugin.foundryProjectConfigService.list(
 				this.plugin.absWorkspacePath,
@@ -200,7 +201,7 @@ export class ProjectServiceManager {
 			);
 
 			if (result.success && result.data) {
-				return result.data.config;
+				return (result.data.config ?? {}) as Record<string, unknown>;
 			}
 
 			return {};
@@ -216,7 +217,7 @@ export class ProjectServiceManager {
 	async saveConfig(
 		projectName: string,
 		key: string,
-		value: any
+		value: unknown
 	): Promise<boolean> {
 		try {
 			const result = await this.plugin.foundryProjectConfigService.set(
@@ -246,7 +247,15 @@ export class ProjectServiceManager {
 	): Promise<void> {
 		let entry = catalogEntry ?? null;
 		const config = await this.getConfig(projectName);
-		const mdfriday = config.params?.mdfriday as Record<string, unknown> | undefined;
+		const paramsRaw = config.params;
+		const paramsObj =
+			paramsRaw && typeof paramsRaw === 'object'
+				? (paramsRaw as Record<string, unknown>)
+				: {};
+		const mdfriday =
+			paramsObj.mdfriday && typeof paramsObj.mdfriday === 'object'
+				? (paramsObj.mdfriday as Record<string, unknown>)
+				: undefined;
 
 		if (!entry && mdfriday?.family && mdfriday?.variant) {
 			entry = await themeApiService.findByFamilyVariant(
@@ -274,7 +283,7 @@ export class ProjectServiceManager {
 		}
 
 		const params = {
-			...(config.params ?? {}),
+			...paramsObj,
 			mdfriday: mergeMdfridayParams(mdfriday, { userStatic }),
 		};
 		await this.saveConfig(projectName, 'params', params);
@@ -285,7 +294,7 @@ export class ProjectServiceManager {
 	 */
 	async saveAllConfig(
 		projectName: string,
-		config: Record<string, any>
+		config: Record<string, unknown>
 	): Promise<boolean> {
 		try {
 			const result = await this.plugin.foundryProjectConfigService.setAll(
@@ -366,7 +375,7 @@ export class ProjectServiceManager {
 		const guest = await foundry.guest(
 			turnstileToken ? { turnstileToken } : undefined,
 		);
-		const key = guest.key || guest.token;
+		const key = guest.key || (guest as { token?: string }).token;
 		if (!guest.success || !key) {
 			new Notice(guest.error || 'Could not create guest Key', 5000);
 			return null;
@@ -424,13 +433,16 @@ export class ProjectServiceManager {
 				throw: false,
 			});
 			if (res.status < 200 || res.status >= 300) {
-				const errBody = typeof res.json === 'object' && res.json ? res.json : null;
+				const errBody: unknown = typeof res.json === 'object' && res.json ? res.json : null;
 				const msg =
-					(errBody as { error?: { message?: string } })?.error?.message ||
+					(errBody as { error?: { message?: string } } | null)?.error?.message ||
 					`HTTP ${res.status}`;
 				return { success: false, error: msg };
 			}
-			const account = (res.json || JSON.parse(res.text || '{}')) as {
+			const account = (
+				(typeof res.json === 'object' && res.json) ||
+				(JSON.parse(res.text || '{}') as unknown)
+			) as {
 				kind?: string;
 				plan?: string;
 				email?: string | null;
@@ -482,7 +494,7 @@ export class ProjectServiceManager {
 					? account.quota.maxCustomDomains
 					: null;
 			this.plugin.settings.mdfQuotaFeatures = Array.isArray(account.quota?.features)
-				? account.quota!.features!
+				? account.quota.features
 				: null;
 
 			const foundry = this.plugin.foundryPublishService;
@@ -586,8 +598,12 @@ export class ProjectServiceManager {
 		});
 		if (!existing.success || !existing.cloudflareProjectId) {
 			const gate = await this.assertCanCreateRemoteProject();
-			if (!gate.ok) {
-				return { error: gate.error, code: gate.code };
+			if (gate.ok === false) {
+				const failure: { error: string; code: 'quota_exceeded' } = {
+					error: gate.error,
+					code: gate.code,
+				};
+				return failure;
 			}
 		}
 
@@ -699,13 +715,16 @@ export class ProjectServiceManager {
 				throw: false,
 			});
 			if (res.status < 200 || res.status >= 300) {
-				const errBody = typeof res.json === 'object' && res.json ? res.json : null;
+				const errBody: unknown = typeof res.json === 'object' && res.json ? res.json : null;
 				const msg =
-					(errBody as { error?: { message?: string } })?.error?.message ||
+					(errBody as { error?: { message?: string } } | null)?.error?.message ||
 					`HTTP ${res.status}`;
 				return { success: false, error: `${msg} (${url})` };
 			}
-			const body = (res.json || JSON.parse(res.text || '{}')) as {
+			const parsed: unknown =
+				(typeof res.json === 'object' && res.json) ||
+				JSON.parse(res.text || '{}');
+			const body = parsed as {
 				projects?: Array<Record<string, unknown>>;
 			};
 			const projects = (body.projects || []).map((p) => {
@@ -728,11 +747,11 @@ export class ProjectServiceManager {
 						? { hostingMode }
 						: {}),
 					...(typeof p.status === 'string' ? { status: p.status } : {}),
-					...(expiresAt !== undefined ? { expiresAt: expiresAt as number | null } : {}),
+					...(expiresAt !== undefined ? { expiresAt: expiresAt } : {}),
 					...(domainHostname ? { domainHostname } : {}),
 					...(domainStatus ? { domainStatus } : {}),
 					...(domainCertStatus ? { domainCertStatus } : {}),
-					...(sourcePath !== undefined ? { sourcePath: sourcePath as string | null } : {}),
+					...(sourcePath !== undefined ? { sourcePath: sourcePath } : {}),
 					...(typeof publicUrl === 'string' ? { publicUrl } : {}),
 				};
 			});
@@ -774,13 +793,13 @@ export class ProjectServiceManager {
 				phase: 'building',
 				percentage: 100,
 				message: 'Faithful package ready',
-			} as ProgressUpdate);
+			});
 		} else {
 			onProgress?.({
 				phase: 'building',
 				percentage: 0,
 				message: 'Building site…',
-			} as ProgressUpdate);
+			});
 
 			const buildResult = await this.build(projectName, (progress) => {
 				onProgress?.(progress);
@@ -853,7 +872,7 @@ export class ProjectServiceManager {
 		projectName: string,
 		options: {
 			port: number;
-			renderer?: any;
+			renderer?: unknown;
 			onProgress?: (progress: ProgressUpdate) => void;
 			publishConfig?: {
 				method?: 'cloudflare';
@@ -867,7 +886,6 @@ export class ProjectServiceManager {
 
 		// Cloudflare publish runs after local preview (not via Serve autoPublish)
 		const useCloudflare = !!publishConfig;
-		const servePublishConfig = undefined;
 
 		if (useCloudflare) {
 			const ensured = await this.ensureShareBaseUrl(projectName);
@@ -885,8 +903,7 @@ export class ProjectServiceManager {
 				workspacePath: this.plugin.absWorkspacePath,
 				projectName,
 				port,
-				markdown: renderer,
-				publishConfig: servePublishConfig
+				...(renderer !== undefined ? { markdown: renderer as never } : {}),
 			},
 			onProgress
 		);
@@ -905,7 +922,7 @@ export class ProjectServiceManager {
 								percentage: progress.percentage ?? 0,
 								message: progress.message,
 								...(progress.currentFile ? { currentFile: progress.currentFile } : {}),
-							} as ProgressUpdate);
+							});
 						},
 					});
 
@@ -927,7 +944,7 @@ export class ProjectServiceManager {
 							publishUrl: publishResult.url,
 							method: 'cloudflare',
 						},
-					} as ProgressUpdate);
+					});
 				}
 
 				// Get project info to retrieve the path
@@ -1018,7 +1035,7 @@ export class ProjectServiceManager {
 					...(options.kind ? { kind: options.kind } : {}),
 					...(options.title ? { title: options.title } : {}),
 				},
-				onProgress as unknown as Parameters<typeof foundry.publishCloudflare>[1],
+				onProgress,
 			);
 
 			if (result.success && result.data) {
@@ -1070,7 +1087,7 @@ export class ProjectServiceManager {
 	 */
 	async testConnection(
 		projectName: string,
-		config: any
+		config: unknown
 	): Promise<ConnectionResult> {
 		try {
 			const result = await this.plugin.foundryPublishService.testConnection(

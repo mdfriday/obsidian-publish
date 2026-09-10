@@ -12,11 +12,10 @@ import type {
 	FolderScanResult,
 	FolderStructure,
 	ProjectRegistry,
-	StaticFolderInfo,
 	SymlinkResult,
 	WorkspaceMetadataData,
 	WorkspaceRepository,
-} from '@mdfriday/foundry/obsidian/mobile';
+} from '../foundry/types';
 import {joinVaultPath} from '../utils/common';
 
 const MDFRIDAY_DIR = '.mdfriday';
@@ -117,7 +116,7 @@ export class ObsidianMobileWorkspaceRepository implements WorkspaceRepository {
 
 		const content = await this.vault.adapter.read(metadataPath);
 
-		return JSON.parse(content);
+		return JSON.parse(content) as WorkspaceMetadataData;
 	}
 
 	async saveProjectRegistry(workspacePath: string, registry: ProjectRegistry): Promise<void> {
@@ -129,7 +128,7 @@ export class ObsidianMobileWorkspaceRepository implements WorkspaceRepository {
 		const registryPath = this.getWorkspacePath(workspacePath, MDFRIDAY_DIR, PROJECTS_FILE);
 		const content = await this.vault.adapter.read(registryPath);
 
-		return JSON.parse(content);
+		return JSON.parse(content) as ProjectRegistry;
 	}
 }
 
@@ -267,7 +266,7 @@ export class ObsidianMobileFileSystemRepository implements FileSystemRepository 
 
 			const entries = await this.readDirectory(dirPath);
 			const contentFolders: ContentFolderInfo[] = [];
-			let staticFolder: StaticFolderInfo | null = null;
+			let staticFolder: { path: string } | null = null;
 
 			for (const entry of entries) {
 				if (!entry.isDirectory) continue;
@@ -534,8 +533,8 @@ export class ObsidianMobileFileSystemRepository implements FileSystemRepository 
 		const upLevels = fromParts.length - commonLength;
 		
 		// 构建相对路径
-		const relativeParts = [
-			...Array(upLevels).fill('..'),
+		const relativeParts: string[] = [
+			...Array.from({ length: upLevels }, () => '..'),
 			...toParts.slice(commonLength)
 		];
 		

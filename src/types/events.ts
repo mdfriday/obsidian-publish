@@ -22,7 +22,7 @@ export interface SiteEventData {
 	};
 	configChanged: {
 		key: string;
-		value: any;
+		value: unknown;
 	};
 	buildRequested: {
 		projectName: string;
@@ -30,7 +30,7 @@ export interface SiteEventData {
 	previewRequested: {
 		projectName: string;
 		port: number;
-		renderer?: any;
+		renderer?: unknown;
 		publishConfig?: {
 			method?: 'cloudflare';
 			config?: unknown;
@@ -40,18 +40,18 @@ export interface SiteEventData {
 	publishRequested: {
 		projectName: string;
 		method: string;
-		config: any;
+		config: unknown;
 	};
 	buildAndPublishRequested: {
 		projectName: string;
 		/** When true, skip Foundry SSG (faithful already wrote public/) */
 		skipBuild?: boolean;
 		/** @deprecated Phase 1.5 — custom OB renderer removed */
-		renderer?: any;
+		renderer?: unknown;
 	};
 	testConnection: {
 		projectName: string;
-		config: any;
+		config: unknown;
 	};
 	stopPreview: {
 		projectName: string;
@@ -100,6 +100,6 @@ export interface ProjectState {
 	path: string;
 	folder: TFolder | null;
 	file: TFile | null;
-	config: Record<string, any>;
+	config: Record<string, unknown>;
 	status: 'initializing' | 'active' | 'building' | 'previewing' | 'publishing';
 }

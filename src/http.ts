@@ -6,12 +6,14 @@
  */
 
 import { requestUrl, type RequestUrlParam, type RequestUrlResponse } from 'obsidian';
+import * as http from 'http';
+import * as https from 'https';
 import type { 
 	PublishHttpClient, 
 	PublishHttpResponse, 
 	IdentityHttpClient, 
 	IdentityHttpResponse,
-} from '@mdfriday/foundry';
+} from './foundry/types';
 
 /**
  * Electron / Obsidian requestUrl rejects forbidden headers with net::ERR_INVALID_ARGUMENT.
@@ -39,10 +41,36 @@ function parseResponseData(text: string): unknown {
 	const trimmed = text.trim();
 	if (!trimmed) return undefined;
 	try {
-		return JSON.parse(trimmed);
+		return JSON.parse(trimmed) as unknown;
 	} catch {
 		return text;
 	}
+}
+
+function isAssetUpload(
+	value: unknown,
+): value is { data: BlobPart; filename: string; contentType?: string } {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		'data' in value &&
+		'filename' in value
+	);
+}
+
+function blobFileName(value: Blob): string {
+	return value instanceof File ? value.name : 'file';
+}
+
+function toStandaloneArrayBuffer(data: Buffer | Uint8Array): ArrayBuffer {
+	const view = data instanceof Uint8Array ? data : new Uint8Array(data);
+	return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
+}
+
+function toNodeBuffer(body: Buffer | Uint8Array | ArrayBuffer): Buffer {
+	if (Buffer.isBuffer(body)) return body;
+	if (body instanceof ArrayBuffer) return Buffer.from(new Uint8Array(body));
+	return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
 }
 
 function adaptObsidianResponse(response: RequestUrlResponse): PublishHttpResponse {
@@ -61,7 +89,7 @@ function adaptObsidianResponse(response: RequestUrlResponse): PublishHttpRespons
 			const trimmed = text.trim();
 			if (!trimmed) return null;
 			try {
-				return JSON.parse(trimmed);
+				return JSON.parse(trimmed) as unknown;
 			} catch {
 				return null;
 			}
@@ -84,7 +112,7 @@ function adaptObsidianIdentityResponse(response: RequestUrlResponse): IdentityHt
 			const trimmed = text.trim();
 			if (!trimmed) return null;
 			try {
-				return JSON.parse(trimmed);
+				return JSON.parse(trimmed) as unknown;
 			} catch {
 				return null;
 			}
@@ -106,9 +134,6 @@ function nodeHttpRequest(
 	headers?: Record<string, string>,
 	body?: Buffer | Uint8Array | ArrayBuffer,
 ): Promise<PublishHttpResponse> {
-	const http = require('http') as typeof import('http');
-	const https = require('https') as typeof import('https');
-
 	return new Promise((resolve, reject) => {
 		const parsed = new URL(url);
 		const transport = parsed.protocol === 'https:' ? https : http;
@@ -116,7 +141,7 @@ function nodeHttpRequest(
 
 		let payload: Buffer | undefined;
 		if (body) {
-			payload = body instanceof Buffer ? body : Buffer.from(body);
+			payload = toNodeBuffer(body);
 			reqHeaders['content-length'] = String(payload.byteLength);
 		}
 
@@ -180,7 +205,7 @@ export class ObsidianHttpClient implements PublishHttpClient {
   /**
    * POST JSON data
    */
-  async postJSON(url: string, data: any, headers?: Record<string, string>): Promise<PublishHttpResponse> {
+  async postJSON(url: string, data: unknown, headers?: Record<string, string>): Promise<PublishHttpResponse> {
     const response = await requestUrl({
       url,
       method: 'POST',
@@ -202,15 +227,14 @@ export class ObsidianHttpClient implements PublishHttpClient {
    */
   async postMultipart(
     url: string,
-    formData: Record<string, any>,
+    formData: Record<string, unknown>,
     headers?: Record<string, string>
   ): Promise<PublishHttpResponse> {
     // Create FormData and populate fields
     const form = new FormData();
     
     for (const [key, value] of Object.entries(formData)) {
-      if (key === 'asset' && typeof value === 'object' && 
-          'data' in value && 'filename' in value && 'contentType' in value) {
+      if (key === 'asset' && isAssetUpload(value)) {
         // Handle special 'asset' field format: {data: Uint8Array, filename: string, contentType: string}
         const blob = new Blob([value.data], { type: value.contentType || 'application/octet-stream' });
         form.append(key, blob, value.filename);
@@ -252,12 +276,7 @@ export class ObsidianHttpClient implements PublishHttpClient {
     headers?: Record<string, string>
   ): Promise<PublishHttpResponse> {
     // Convert Buffer / TypedArray view to a standalone ArrayBuffer
-    let arrayBuffer: ArrayBuffer;
-    if (data instanceof Buffer) {
-      arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
-    } else {
-      arrayBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
-    }
+    const arrayBuffer = toStandaloneArrayBuffer(data);
 
     // Do not force Content-Type — R2 SigV4 signs content-type; caller headers win.
     // Strip Host / Content-Length — Electron requestUrl rejects them (ERR_INVALID_ARGUMENT).
@@ -346,7 +365,7 @@ export class ObsidianHttpClient implements PublishHttpClient {
         bodyParts.push(`Content-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`);
       } else if (value instanceof Blob) {
         // 处理 Blob 值（文件上传）
-        const blobName = (value as any).name || 'file';
+        const blobName = blobFileName(value);
         bodyParts.push(
           `Content-Disposition: form-data; name="${key}"; filename="${blobName}"\r\n`
         );
@@ -386,7 +405,7 @@ export class ObsidianHttpClient implements PublishHttpClient {
    * friday/src/hugoverse.ts:220-268
    */
   private async formDataToArrayBuffer(
-    formData: Record<string, any>,
+    formData: Record<string, unknown>,
     boundary: string
   ): Promise<ArrayBuffer> {
     const bodyParts: (string | Uint8Array)[] = [];
@@ -399,7 +418,7 @@ export class ObsidianHttpClient implements PublishHttpClient {
         bodyParts.push(`Content-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`);
       } else if (value instanceof Blob) {
         // 处理 Blob 值（文件上传）
-        const blobName = (value as any).name || 'file';
+        const blobName = blobFileName(value);
         bodyParts.push(
           `Content-Disposition: form-data; name="${key}"; filename="${blobName}"\r\n` +
           `Content-Type: ${value.type || 'application/octet-stream'}\r\n\r\n`
@@ -482,7 +501,7 @@ export class ObsidianIdentityHttpClient implements IdentityHttpClient {
   /**
    * POST JSON data
    */
-  async post(url: string, data: any, headers?: Record<string, string>): Promise<IdentityHttpResponse> {
+  async post(url: string, data: unknown, headers?: Record<string, string>): Promise<IdentityHttpResponse> {
     const response = await requestUrl({
       url,
       method: 'POST',
@@ -500,7 +519,7 @@ export class ObsidianIdentityHttpClient implements IdentityHttpClient {
   /**
    * POST JSON data (alias for compatibility)
    */
-  async postJSON(url: string, data: any, headers?: Record<string, string>): Promise<IdentityHttpResponse> {
+  async postJSON(url: string, data: unknown, headers?: Record<string, string>): Promise<IdentityHttpResponse> {
     return this.post(url, data, headers);
   }
 
@@ -535,15 +554,14 @@ export class ObsidianIdentityHttpClient implements IdentityHttpClient {
    */
   async postMultipart(
     url: string,
-    data: Record<string, any>,
+    data: Record<string, unknown>,
     headers?: Record<string, string>
   ): Promise<IdentityHttpResponse> {
     // Create FormData and populate fields
     const formData = new FormData();
     
     for (const [key, value] of Object.entries(data)) {
-      if (key === 'asset' && typeof value === 'object' && 
-          'data' in value && 'filename' in value && 'contentType' in value) {
+      if (key === 'asset' && isAssetUpload(value)) {
         // Handle special 'asset' field format: {data: Uint8Array, filename: string, contentType: string}
         const blob = new Blob([value.data], { type: value.contentType || 'application/octet-stream' });
         formData.append(key, blob, value.filename);
@@ -619,7 +637,7 @@ export class ObsidianIdentityHttpClient implements IdentityHttpClient {
         bodyParts.push(`Content-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`);
       } else if (value instanceof Blob) {
         // 处理 Blob 值（文件上传）
-        const blobName = (value as any).name || 'file';
+        const blobName = blobFileName(value);
         bodyParts.push(
           `Content-Disposition: form-data; name="${key}"; filename="${blobName}"\r\n`
         );
@@ -659,7 +677,7 @@ export class ObsidianIdentityHttpClient implements IdentityHttpClient {
    * friday/src/hugoverse.ts:220-268
    */
   private async formDataToArrayBuffer(
-    formData: Record<string, any>,
+    formData: Record<string, unknown>,
     boundary: string
   ): Promise<ArrayBuffer> {
     const bodyParts: (string | Uint8Array)[] = [];
@@ -672,7 +690,7 @@ export class ObsidianIdentityHttpClient implements IdentityHttpClient {
         bodyParts.push(`Content-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`);
       } else if (value instanceof Blob) {
         // 处理 Blob 值（文件上传）
-        const blobName = (value as any).name || 'file';
+        const blobName = blobFileName(value);
         bodyParts.push(
           `Content-Disposition: form-data; name="${key}"; filename="${blobName}"\r\n` +
           `Content-Type: ${value.type || 'application/octet-stream'}\r\n\r\n`

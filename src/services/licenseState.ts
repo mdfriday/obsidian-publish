@@ -17,7 +17,8 @@ import type {
 	ObsidianAuthStatus,
 	ObsidianDomainService,
 	ObsidianDomainInfo,
-} from '@mdfriday/foundry';
+	ObsidianSyncConfig,
+} from '../foundry/types';
 import type { LicenseFeatures } from '../license';
 
 /**
@@ -291,7 +292,7 @@ export class LicenseStateManager {
 	 * Get sync configuration
 	 * Returns sync config from authStatus if available
 	 */
-	getSyncConfig(): any | null {
+	getSyncConfig(): ObsidianSyncConfig | null {
 		if (!this.authStatus?.hasSyncConfig || !this.authStatus?.syncConfig) {
 			return null;
 		}

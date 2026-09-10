@@ -33,16 +33,16 @@ export class Site {
 		this.app = this.plugin.app;
 
 		// 初始化多语言内容数组
-		this.languageContents = writable([]);
+		this.languageContents = writable<LanguageContent[]>([]);
 		// 初始化站点资源
-		this.siteAssets = writable(null);
+		this.siteAssets = writable<SiteAssets | null>(null);
 	}
 
 	/**
 	 * 生成随机ID
 	 */
 	private generateRandomId(): string {
-		return Math.random().toString(36).substr(2, 9);
+		return Math.random().toString(36).substring(2, 11);
 	}
 
 	/**

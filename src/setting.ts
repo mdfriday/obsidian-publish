@@ -16,15 +16,12 @@ export class FridaySettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl('h2', {
-			text: 'MDFriday Publish',
-			cls: 'friday-section-title',
-		});
+		new Setting(containerEl).setName('Credentials').setHeading();
 
 		const mdfKey = this.plugin.settings.mdfKey;
 
 		new Setting(containerEl)
-			.setName('Credential (MDF Key)')
+			.setName('Credential (mdf key)')
 			.setDesc(
 				mdfKey
 					? `Key ${mdfKey.slice(0, 12)}… — copy to use on Account or another device.`
@@ -32,12 +29,12 @@ export class FridaySettingTab extends PluginSettingTab {
 			)
 			.addExtraButton((btn) => {
 				btn.setIcon('copy');
-				btn.setTooltip('Copy Key');
+				btn.setTooltip('Copy key');
 				btn.setDisabled(!mdfKey);
 				btn.onClick(async () => {
 					if (!mdfKey) return;
 					await navigator.clipboard.writeText(mdfKey);
-					new Notice('MDF Key copied', 2000);
+					new Notice('Mdf key copied', 2000);
 				});
 			});
 	}

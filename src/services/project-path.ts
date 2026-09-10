@@ -1,4 +1,4 @@
-import type { TAbstractFile, TFile, TFolder } from 'obsidian';
+import { TFile, TFolder, type TAbstractFile } from 'obsidian';
 import type FridayPlugin from '../main';
 import type { PathPublishConfig } from '../types/publish-config';
 
@@ -61,8 +61,8 @@ export function remapPathAfterRename(
 	plugin: FridayPlugin,
 ): string {
 	const rel = toVaultRelativePath(plugin, stored) ?? normalizeVaultPath(stored);
-	const oldN = normalizeVaultPath(oldVaultPath)!;
-	const newN = normalizeVaultPath(newVaultPath)!;
+	const oldN = normalizeVaultPath(oldVaultPath);
+	const newN = normalizeVaultPath(newVaultPath);
 	if (!rel) return stored;
 
 	let nextRel = rel;
@@ -127,9 +127,11 @@ export function deletePathConfigKey(plugin: FridayPlugin, vaultPath: string): bo
 export function selectionFromAbstract(
 	file: TAbstractFile,
 ): { folder: TFolder | null; file: TFile | null } {
-	// Caller should pass TFile | TFolder; duck-type for folder vs file.
-	if ('extension' in file && typeof (file as TFile).extension === 'string') {
-		return { folder: null, file: file as TFile };
+	if (file instanceof TFile) {
+		return { folder: null, file };
 	}
-	return { folder: file as TFolder, file: null };
+	if (file instanceof TFolder) {
+		return { folder: file, file: null };
+	}
+	return { folder: null, file: null };
 }

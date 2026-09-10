@@ -13,8 +13,9 @@
  */
 
 import type { Plugin, TFile } from 'obsidian';
-import { MarkdownRenderer as ObsidianMarkdownRenderer } from 'obsidian';
+import { Component, FileSystemAdapter, MarkdownRenderer as ObsidianMarkdownRenderer } from 'obsidian';
 import * as fs from 'fs';
+import * as http from 'http';
 import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'crypto';
@@ -24,6 +25,10 @@ import { buildEncryptGateHtml, encryptAESGCM } from './encrypt';
 function resolveFaithfulEncryptCdn(plugin: Plugin): string {
 	const settings = (plugin as { settings?: Parameters<typeof resolveCdnBaseUrl>[0] }).settings;
 	return settings ? resolveCdnBaseUrl(settings) : 'https://cdn.fsky.top';
+}
+
+function vaultConfigDir(plugin: Plugin): string {
+	return plugin.app.vault.configDir;
 }
 
 export type ThemeSnapshot = {
@@ -76,13 +81,13 @@ export type ThemeClassBundle = {
  * Prefer adapter.getBasePath(); fall back to vault.adapter / plugin vault root.
  */
 function resolveVaultPath(plugin: Plugin, vaultPath: string): string {
-	const adapter = plugin.app.vault.adapter as any;
-	const absRoot =
-		typeof adapter.getBasePath === 'function'
-			? adapter.getBasePath()
-			: typeof adapter.getFullPath === 'function'
-				? adapter.getFullPath('')
-				: process.cwd();
+	const adapter = plugin.app.vault.adapter;
+	let absRoot: string;
+	if (adapter instanceof FileSystemAdapter) {
+		absRoot = adapter.getBasePath();
+	} else {
+		absRoot = process.cwd();
+	}
 	return path.join(absRoot, vaultPath.replace(/^\.\//, ''));
 }
 
@@ -235,7 +240,7 @@ export function detectClassSelectFlavor(
 	}
 
 	// Blue Topaz-style: body.color-scheme-options-*
-	const schemeMatches = [...themeCss.matchAll(/color-scheme-options-([a-z0-9\-]+)/gi)];
+	const schemeMatches = [...themeCss.matchAll(/color-scheme-options-([a-z0-9-]+)/gi)];
 	if (schemeMatches.length > 0) {
 		const names = schemeMatches.map((m) => `color-scheme-options-${m[1]}`);
 		const preferred = dark
@@ -271,10 +276,10 @@ export function parseClassSelectDefaults(
 	// Prefer id + default near theme-light / theme-dark
 	// e.g. id: anuppuccin-theme-light ... default: ctp-latte
 	const light = themeCss.match(
-		/id:\s*[\s\S]{0,80}?theme-light[\s\S]{0,400}?default:\s*([a-z0-9\-]+)/i,
+		/id:\s*[\s\S]{0,80}?theme-light[\s\S]{0,400}?default:\s*([a-z0-9-]+)/i,
 	);
 	const dark = themeCss.match(
-		/id:\s*[\s\S]{0,80}?theme-dark[\s\S]{0,400}?default:\s*([a-z0-9\-]+)/i,
+		/id:\s*[\s\S]{0,80}?theme-dark[\s\S]{0,400}?default:\s*([a-z0-9-]+)/i,
 	);
 	if (light?.[1] && light[1] !== 'none') defaults.lightFlavor = light[1];
 	if (dark?.[1] && dark[1] !== 'none') defaults.darkFlavor = dark[1];
@@ -293,13 +298,14 @@ async function collectAppearance(plugin: Plugin): Promise<{
 	snippets: string[];
 	appearance: Record<string, unknown> | null;
 }> {
-	const appearanceRaw = await readVaultFile(plugin, '.obsidian/appearance.json');
+	const configDir = vaultConfigDir(plugin);
+	const appearanceRaw = await readVaultFile(plugin, `${configDir}/appearance.json`);
 	if (!appearanceRaw) {
 		return { themeName: null, snippets: [], appearance: null };
 	}
 	let appearance: Record<string, unknown>;
 	try {
-		appearance = JSON.parse(appearanceRaw);
+		appearance = JSON.parse(appearanceRaw) as Record<string, unknown>;
 	} catch {
 		return { themeName: null, snippets: [], appearance: null };
 	}
@@ -315,7 +321,7 @@ async function collectAppearance(plugin: Plugin): Promise<{
 	const snippets: string[] = [];
 	for (const name of snippetsRaw) {
 		if (typeof name !== 'string' || !name.trim()) continue;
-		const snippetPath = `.obsidian/snippets/${name.trim()}.css`;
+		const snippetPath = `${configDir}/snippets/${name.trim()}.css`;
 		const content = await readVaultFile(plugin, snippetPath);
 		if (content) snippets.push(content);
 	}
@@ -324,10 +330,10 @@ async function collectAppearance(plugin: Plugin): Promise<{
 }
 
 /**
- * Discover installed theme folder names under `.obsidian/themes/`.
+ * Discover installed theme folder names under `${vaultConfigDir(plugin)}/themes/`.
  */
 async function listVaultThemes(plugin: Plugin): Promise<string[]> {
-	const themesDir = `.obsidian/themes`;
+	const themesDir = `${vaultConfigDir(plugin)}/themes`;
 	try {
 		if (!(await plugin.app.vault.adapter.exists(themesDir))) return [];
 		const names: string[] = [];
@@ -360,8 +366,8 @@ async function resolveThemeCssFile(
 ): Promise<{ content: string; name: string | null }> {
 	if (themeName) {
 		const candidates = [
-			`.obsidian/themes/${themeName}/theme.css`,
-			`.obsidian/themes/${encodeURIComponent(themeName)}/theme.css`,
+			`${vaultConfigDir(plugin)}/themes/${themeName}/theme.css`,
+			`${vaultConfigDir(plugin)}/themes/${encodeURIComponent(themeName)}/theme.css`,
 		];
 		for (const p of candidates) {
 			const content = await readVaultFile(plugin, p);
@@ -375,7 +381,7 @@ async function resolveThemeCssFile(
 		const only = themes[0];
 		const content = await readVaultFile(
 			plugin,
-			`.obsidian/themes/${only}/theme.css`,
+			`${vaultConfigDir(plugin)}/themes/${only}/theme.css`,
 		);
 		if (content) return { content, name: only };
 	}
@@ -383,7 +389,7 @@ async function resolveThemeCssFile(
 	for (const only of themes) {
 		const content = await readVaultFile(
 			plugin,
-			`.obsidian/themes/${only}/theme.css`,
+			`${vaultConfigDir(plugin)}/themes/${only}/theme.css`,
 		);
 		if (content) return { content, name: only };
 	}
@@ -392,8 +398,9 @@ async function resolveThemeCssFile(
 
 /**
  * Read core Obsidian CSS (app.css) if available.
+ * Must use native fetch — Obsidian `requestUrl` cannot load `app://` protocol assets.
  */
-async function collectCoreCss(plugin: Plugin): Promise<string> {
+async function collectCoreCss(_plugin: Plugin): Promise<string> {
 	try {
 		const url = 'app://obsidian.md/app.css';
 		const res = await fetch(url);
@@ -411,7 +418,8 @@ async function collectCoreCss(plugin: Plugin): Promise<string> {
 async function collectActivePluginStyles(plugin: Plugin): Promise<string> {
 	const parts: string[] = [];
 	try {
-		const raw = await readVaultFile(plugin, '.obsidian/community-plugins.json');
+		const configDir = vaultConfigDir(plugin);
+		const raw = await readVaultFile(plugin, `${configDir}/community-plugins.json`);
 		if (!raw) return '';
 		const ids = JSON.parse(raw) as string[];
 		if (!Array.isArray(ids)) return '';
@@ -419,7 +427,7 @@ async function collectActivePluginStyles(plugin: Plugin): Promise<string> {
 			if (typeof id !== 'string' || !id.trim()) continue;
 			const content = await readVaultFile(
 				plugin,
-				`.obsidian/plugins/${id}/styles.css`,
+				`${configDir}/plugins/${id}/styles.css`,
 			);
 			if (content && content.trim()) {
 				parts.push(`/* plugin: ${id} */\n${content}`);
@@ -481,7 +489,7 @@ async function copyAsset(
 	if (!(await plugin.app.vault.adapter.exists(abs))) {
 		throw new Error(`asset missing: ${assetPath}`);
 	}
-	const destName = path.basename(assetPath).replace(/[^\w.\-]/g, '_');
+	const destName = path.basename(assetPath).replace(/[^\w.-]/g, '_');
 	const destRel = path.join('assets', destName);
 	const destAbs = path.join(assetsDir, destName);
 	const content = await plugin.app.vault.adapter.read(abs);
@@ -650,8 +658,8 @@ async function copyAssetBestEffort(
 	// Already mapped?
 	if (assetsMap.has(assetPath)) {
 		return {
-			outPath: assetsMap.get(assetPath)!,
-			destAbs: path.join(assetsDir, path.basename(assetsMap.get(assetPath)!)),
+			outPath: assetsMap.get(assetPath),
+			destAbs: path.join(assetsDir, path.basename(assetsMap.get(assetPath))),
 		};
 	}
 
@@ -665,7 +673,7 @@ async function copyAssetBestEffort(
 
 	// 2) Theme folder-relative public/ path
 	if (themeName) {
-		const themeRel = `.obsidian/themes/${themeName}/${assetPath.replace(/^public\//, '')}`;
+		const themeRel = `${vaultConfigDir(plugin)}/themes/${themeName}/${assetPath.replace(/^public\//, '')}`;
 		try {
 			const copied = await copyAsset(plugin, themeRel, assetsDir, assetsMap);
 			assetsMap.set(assetPath, copied.outPath);
@@ -679,7 +687,7 @@ async function copyAssetBestEffort(
 	// 3) Theme-relative public/ from themePublicHints
 	for (const hint of themePublicHints) {
 		if (assetPath === hint || assetPath.endsWith(path.basename(hint))) {
-			const themeRel = `.obsidian/themes/${themeName}/${assetPath}`;
+			const themeRel = `${vaultConfigDir(plugin)}/themes/${themeName}/${assetPath}`;
 			try {
 				const copied = await copyAsset(plugin, themeRel, assetsDir, assetsMap);
 				assetsMap.set(assetPath, copied.outPath);
@@ -691,13 +699,13 @@ async function copyAssetBestEffort(
 		}
 	}
 
-	// 4) App-origin (Obsidian core fonts)
+	// 4) App-origin (Obsidian core fonts) — native fetch required for app://
 	try {
 		const url = `app://obsidian.md/${assetPath}`;
 		const res = await fetch(url);
 		if (res.ok) {
 			const buf = Buffer.from(await res.arrayBuffer());
-			const destName = path.basename(assetPath).replace(/[^\w.\-]/g, '_');
+			const destName = path.basename(assetPath).replace(/[^\w.-]/g, '_');
 			const destRel = path.join('assets', destName);
 			const destAbs = path.join(assetsDir, destName);
 			await fs.promises.writeFile(destAbs, buf);
@@ -783,25 +791,32 @@ export async function renderNoteWithObsidian(
 	const classes = themeClasses.length
 		? themeClasses.join(' ')
 		: detectThemeClasses().join(' ');
-	const container = document.createElement('div');
+	const container = createDiv();
 	container.className = `markdown-preview-view markdown-rendered ${classes}`.trim();
 	// Append to body so theme classes on container inherit from body styles
 	if (!document.body.contains(container)) {
 		document.body.appendChild(container);
 	}
 	try {
-		await ObsidianMarkdownRenderer.render(
-			plugin.app,
-			source,
-			container,
-			file.path,
-			plugin,
-		);
+		// Short-lived Component — do not pass the Plugin instance (obsidianmd/no-plugin-as-component).
+		const renderHost = new Component();
+		renderHost.load();
+		try {
+			await ObsidianMarkdownRenderer.render(
+				plugin.app,
+				source,
+				container,
+				file.path,
+				renderHost,
+			);
+		} finally {
+			renderHost.unload();
+		}
 		// Wait for plugin-rendered content (dataview etc.)
-		await new Promise((r) => setTimeout(r, 120));
+		await new Promise((r) => window.setTimeout(r, 120));
 		// If container is still empty after render, wait a bit more for async plugins
 		if (!container.innerHTML.trim()) {
-			await new Promise((r) => setTimeout(r, 300));
+			await new Promise((r) => window.setTimeout(r, 300));
 		}
 		return {
 			html: container.innerHTML,
@@ -1019,13 +1034,11 @@ export async function serveFaithfulPublicDir(
 
 /**
  * Start an independent local static server for Obsidian preview.
- * Uses require('http') — dynamic import('http') fails in Obsidian plugin runtime.
+ * Uses Node `http` (externalized by esbuild) — available in desktop Electron.
  */
 export async function startStaticServer(
 	dir: string,
 ): Promise<{ url: string; stop: () => void }> {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
-	const http = require('http') as typeof import('http');
 	const server = http.createServer((req, res) => {
 		try {
 			const urlPath = (req.url || '/').split('?')[0];

@@ -28,7 +28,7 @@ function catalogApiBase(plugin?: FridayPlugin): string {
 		return fromSettings.replace(/\/$/, '');
 	}
 	if (plugin?.licenseState?.getApiUrl()) {
-		return plugin.licenseState.getApiUrl()!.replace(/\/$/, '');
+		return plugin.licenseState.getApiUrl().replace(/\/$/, '');
 	}
 	return 'https://api.fsky.top';
 }
