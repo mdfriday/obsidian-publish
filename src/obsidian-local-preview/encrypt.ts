@@ -14,9 +14,9 @@ import * as crypto from 'crypto';
 
 /**
  * Concrete CDN folder for base encrypt assets.
- * Keep aligned with notes/quartz `engine.base` (e.g. ^2.2.1 → 2.2.1).
+ * Keep aligned with notes/quartz `engine.base` (e.g. ^2.2.3 → 2.2.3).
  */
-export const ENCRYPT_GATE_BASE_VERSION = '2.2.1';
+export const ENCRYPT_GATE_BASE_VERSION = '2.2.3';
 
 /**
  * Gate-only overrides. Scoped to `#mdf-encrypt-modal` so Obsidian preview CSS
