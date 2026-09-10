@@ -349,7 +349,6 @@
 	}
 
 	function togglePassword() {
-		if (!isPersonal) return;
 		passwordOn = !passwordOn;
 		if (!passwordOn) onPasswordChange('');
 	}
@@ -903,16 +902,13 @@
 									<span class="field-label" style="margin:0;">{t('ui.access_password')}</span>
 									<div
 										class="toggle"
-										class:on={passwordOn && isPersonal}
-										class:is-disabled={!isPersonal}
+										class:on={passwordOn}
 										role="switch"
-										aria-checked={passwordOn && isPersonal}
-										aria-disabled={!isPersonal}
-										tabindex={isPersonal ? 0 : -1}
+										aria-checked={passwordOn}
+										tabindex={0}
 										aria-label={t('ui.access_password')}
 										on:click={togglePassword}
 										on:keydown={(e) => {
-											if (!isPersonal) return;
 											if (e.key === 'Enter' || e.key === ' ') {
 												e.preventDefault();
 												togglePassword();
@@ -925,14 +921,10 @@
 									type="password"
 									placeholder={t('ui.site_password_placeholder')}
 									value={sitePassword}
-									disabled={!isPersonal || !passwordOn}
+									disabled={!passwordOn}
 									on:input={onPwdInput}
 								/>
-								{#if isPersonal}
-									<p class="helper">{t('ui.password_helper')}</p>
-								{:else}
-									<p class="helper lock">{t('ui.password_personal_only')}</p>
-								{/if}
+								<p class="helper">{t('ui.password_helper')}</p>
 							</div>
 
 							<div class="field-group">

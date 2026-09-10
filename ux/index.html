@@ -1159,7 +1159,7 @@
   function planLabel(p) {
     return { guest: 'Guest', free: 'Free', personal: 'Personal' }[p];
   }
-  function canUsePassword() { return state.plan === 'personal'; }
+  function canUsePassword() { return true; }
   function canUseDomain() { return state.plan === 'personal'; }
   function canUseHistory() { return state.plan === 'personal'; }
   function needsTurnstile() { return state.plan === 'guest' && !state.firstPublishVerified; }
@@ -1404,15 +1404,14 @@
     toggle.setAttribute('aria-expanded', state.advancedOpen ? 'true' : 'false');
     if (card) card.classList.toggle('open', state.advancedOpen);
     body.classList.toggle('open', state.advancedOpen);
-    const pwdOk = canUsePassword();
     const pwdToggle = $('#pwdToggle');
     const pwdInput = $('#pwdInput');
-    pwdToggle.classList.toggle('on', state.passwordOn && pwdOk);
-    pwdToggle.disabled = !pwdOk;
-    pwdInput.disabled = !pwdOk || !state.passwordOn;
+    pwdToggle.classList.toggle('on', state.passwordOn);
+    pwdToggle.disabled = false;
+    pwdInput.disabled = !state.passwordOn;
     pwdInput.value = state.password;
-    $('#pwdHelper').textContent = pwdOk ? '访客需输入密码才能查看' : 'Personal 计划可用 · 升级后解锁访问密码';
-    $('#pwdHelper').classList.toggle('lock', !pwdOk);
+    $('#pwdHelper').textContent = '访客需输入密码才能查看';
+    $('#pwdHelper').classList.remove('lock');
     const domOk = canUseDomain();
     const domainInput = $('#domainInput');
     domainInput.disabled = !domOk;
@@ -2019,8 +2018,8 @@
   });
 
   $('#pwdToggle').addEventListener('click', () => {
-    if (!canUsePassword()) { toast('升级 Personal 解锁访问密码'); return; }
     state.passwordOn = !state.passwordOn;
+    if (!state.passwordOn) state.password = '';
     renderAdvanced();
   });
   $('#pwdInput').addEventListener('input', (e) => { state.password = e.target.value; });
