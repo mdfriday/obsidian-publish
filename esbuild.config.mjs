@@ -12,8 +12,9 @@ if you want to view the source, please visit the github repository of this plugi
 `
 
 const prod = process.argv[2] === 'production'
-// Ship default: staging. Override: MDF_CF_ENV=production npm run build
-const defaultCfEnv = process.env.MDF_CF_ENV || (prod ? 'staging' : 'local')
+// watch/dev → staging (fsky.top); production build → production (mdfriday.com)
+// Override: MDF_CF_ENV=local|staging|production
+const defaultCfEnv = process.env.MDF_CF_ENV || (prod ? 'production' : 'staging')
 // Change this to your local Obsidian plugin path for development
 const pluginDir = path.join(process.env.HOME || '', 'Desktop', 'obsidian-test', '.obsidian', 'plugins', 'mdfriday-publish');
 

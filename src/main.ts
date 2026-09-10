@@ -13,8 +13,6 @@ import type {
 // Mobile 专用配置类型
 import type {ObsidianEnvironmentConfig as ObsidianMobileEnvironmentConfig,} from '@mdfriday/foundry/obsidian/mobile';
 import {createObsidianHttpClient, createObsidianIdentityHttpClient} from './http';
-import {LicenseServiceManager} from './services/license';
-import {DomainServiceManager} from './services/domain';
 import {LicenseStateManager} from './services/licenseState';
 import {ProjectServiceManager} from './services/project';
 import {
@@ -32,23 +30,20 @@ import {buildThemeConfigPatch} from './theme/theme-config';
 import {joinPath, joinVaultPath} from './utils/common';
 import {
 	DEFAULT_CLOUDFLARE_ENV,
-	type CloudflareEnvMode,
 	type CloudflareEnvResolved,
 	endpointsForEnv,
 	resolveAccountBaseUrl,
-	resolveCloudflareEnv,
 } from './cloudflare-env';
 
 // PC-only module types (dynamically imported)
 import type {Hugoverse} from "./hugoverse";
 import type {Site} from "./site";
-import type {ThemeSelectionModal} from "./theme/modal";
-import type {FoundryProjectManagementModal} from "./projects/foundryModal";
 
 // Export view type for dynamic import
 export const FRIDAY_SERVER_VIEW_TYPE = 'Friday_Service';
 
 interface FridaySettings {
+	/** Theme pack download region (fixed default; no Settings UI). */
 	downloadServer: 'global' | 'east';
 	/** Unified MDF_… Key (guest or user). Kind is not encoded in the string. */
 	mdfKey: string | null;
@@ -79,13 +74,12 @@ interface FridaySettings {
 	/** @deprecated migrated away — JWT not stored in plugin */
 	cloudflareUserToken?: string | null;
 	/**
-	 * Single env switch. Endpoints are derived from presets (see cloudflare-env.ts).
-	 * `auto` = probe local API on apply; if up use local, else staging.
+	 * @deprecated compile-time DEFAULT_CLOUDFLARE_ENV always wins; kept for data.json compat.
 	 */
-	cloudflareEnv: CloudflareEnvMode;
-	/** Last resolved env (after auto probe) — used to clear Key on switch */
+	cloudflareEnv?: string;
+	/** Last applied compile-time env */
 	cloudflareResolvedEnv: CloudflareEnvResolved | null;
-	/** Derived — do not edit by hand; refreshed by applyCloudflareEnv() */
+	/** Derived — refreshed by applyCloudflareEnv() */
 	cloudflareApiBaseUrl: string;
 	cloudflarePublicBaseUrl: string;
 	/** Account site for OAuth / claim (?key=) */
@@ -153,8 +147,6 @@ export default class FridayPlugin extends Plugin {
 	foundryAuthService?: any // Type inferred at runtime
 	foundryLicenseService?: any // Type inferred at runtime
 	foundryDomainService?: ObsidianDomainService | null
-	licenseServiceManager?: LicenseServiceManager | null
-	domainServiceManager?: DomainServiceManager | null
 	projectServiceManager?: ProjectServiceManager | null
 	// License state manager (unified license state from Foundry)
 	licenseState?: LicenseStateManager | null
@@ -184,15 +176,10 @@ export default class FridayPlugin extends Plugin {
 		timer: ReturnType<typeof setTimeout>;
 	} | null = null;
 	
-	// PC-only state
-	private previousDownloadServer: 'global' | 'east' = 'global'
-	
 	// View management state
 	private viewInitialized: boolean = false
 	
 	// Dynamic module references for PC-only features
-	private ThemeSelectionModalClass?: typeof ThemeSelectionModal
-	private FoundryProjectManagementModalClass?: typeof FoundryProjectManagementModal
 	private themeApiService?: typeof import("./theme/themeApiService").themeApiService
 
 	async onload() {
@@ -290,44 +277,27 @@ export default class FridayPlugin extends Plugin {
 	 * Initialize desktop-only features
 	 */
 	private async initDesktopFeatures(): Promise<void> {
-		// Dynamically import PC-only modules
-		// Note: Hugoverse is already initialized in initCore for license operations
 		const [
 			{ default: ServerView },
-			{ ThemeSelectionModal },
-			{ FoundryProjectManagementModal },
 			{ Site },
 			{ themeApiService },
 		] = await Promise.all([
 			import('./server'),
-			import('./theme/modal'),
-			import('./projects/foundryModal'),
 			import('./site'),
 			import('./theme/themeApiService'),
 		]);
 		
-		// Import PC-only styles
 		await Promise.all([
 			import('./styles/mdf-tokens.css'),
 			import('./styles/apple-panel.css'),
 			import('./styles/capability-sections.css'),
-			import('./styles/theme-modal.css'),
-			import('./styles/publish-settings.css'),
-			import('./styles/project-modal.css'),
 		]);
 		
-		// Store dynamic module references
-		this.ThemeSelectionModalClass = ThemeSelectionModal;
-		this.FoundryProjectManagementModalClass = FoundryProjectManagementModal;
 		this.themeApiService = themeApiService;
-		
-		// Initialize PC-only services (hugoverse already initialized in initCore)
 		this.site = new Site(this);
 
-		// Initialize workspace service (PC-only)
 		await this.initializeWorkspace();
 		
-		// Register view with protection against duplicate registration
 		try {
 			this.registerView(FRIDAY_SERVER_VIEW_TYPE, leaf => new ServerView(leaf, this));
 		} catch (e) {
@@ -335,15 +305,6 @@ export default class FridayPlugin extends Plugin {
 		}
 		
 		this.app.workspace.onLayoutReady(() => this.initLeaf());
-		
-		// Add ribbon icon for project management
-		this.addRibbonIcon(FRIDAY_ICON, this.i18n.t('projects.manage_projects'), async () => {
-			// Use new Foundry-based project management modal
-			if (this.FoundryProjectManagementModalClass) {
-				const modal = new this.FoundryProjectManagementModalClass(this.app, this);
-				modal.open();
-			}
-		});
 		
 		// Add internet icon to markdown view header
 		this.registerEvent(
@@ -354,33 +315,11 @@ export default class FridayPlugin extends Plugin {
 			})
 		);
 		
-		// Also add to currently active view on load
 		this.app.workspace.onLayoutReady(() => {
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (activeView) {
 				this.addInternetIconToView(activeView);
 			}
-		});
-		
-		// Register open project management command (PC-only)
-		this.addCommand({
-			id: "open-project-management",
-			name: this.i18n.t('projects.manage_projects'),
-			callback: () => {
-				if (this.FoundryProjectManagementModalClass) {
-					const modal = new this.FoundryProjectManagementModalClass(this.app, this);
-					modal.open();
-				}
-			}
-		});
-
-		this.addCommand({
-			id: 'open-cloudflare-projects',
-			name: 'Cloudflare: manage remote projects / domains',
-			callback: async () => {
-				const { CloudflareProjectsModal } = await import('./projects/cloudflareProjectsModal');
-				new CloudflareProjectsModal(this.app, this).open();
-			},
 		});
 		
 		// Register context menu for files and folders (PC-only):
@@ -531,24 +470,6 @@ export default class FridayPlugin extends Plugin {
 		this.foundryAuthService = createObsidianAuthService(identityHttpClient);
 		this.foundryLicenseService = createObsidianLicenseService(identityHttpClient);
 		this.foundryDomainService = createObsidianDomainService(identityHttpClient);
-		
-		// Create License Service Manager
-		if (this.foundryLicenseService && this.foundryAuthService && this.foundryGlobalConfigService) {
-			this.licenseServiceManager = new LicenseServiceManager(
-				this.foundryLicenseService,
-				this.foundryAuthService,
-				this.foundryGlobalConfigService,
-				this.absWorkspacePath
-			);
-		}
-		
-	// Create Domain Service Manager
-	if (this.foundryDomainService) {
-		this.domainServiceManager = new DomainServiceManager(
-			this.foundryDomainService,
-			this.absWorkspacePath
-		);
-	}
 
 	// Create Project Service Manager
 	if (this.foundryProjectService && this.foundryProjectConfigService) {
@@ -654,17 +575,7 @@ export default class FridayPlugin extends Plugin {
 		}
 		
 		// 创建服务管理器（只创建 Mobile 需要的）
-		if (this.foundryLicenseService && this.foundryAuthService && this.foundryGlobalConfigService) {
-			this.licenseServiceManager = new LicenseServiceManager(
-				this.foundryLicenseService,
-				this.foundryAuthService,
-				this.foundryGlobalConfigService,
-				this.absWorkspacePath
-			);
-		}
-		
-		// 注意：不创建 DomainServiceManager（Mobile 不需要）
-		// 注意：不创建 ProjectServiceManager（Mobile 不需要）
+		// 注意：不创建 DomainServiceManager / ProjectServiceManager（Mobile 不需要）
 		
 		// Create License State Manager (optional on mobile)
 		if (this.foundryLicenseService && this.foundryAuthService) {
@@ -1512,16 +1423,6 @@ export default class FridayPlugin extends Plugin {
 		}
 	}
 
-	showThemeSelectionModal(
-		selectedSlug: string,
-		onSelect: (entry: import('./theme/types').CatalogEntry) => void,
-		isForSingleFile: boolean = false,
-	) {
-		const modal = new this.ThemeSelectionModalClass!(this.app, selectedSlug, onSelect, this, isForSingleFile);
-		modal.open();
-	}
-
-
 	/**
 	 * Add internet icon to markdown view header.
 	 * Opens a menu with publish-to-web and add-to-list options.
@@ -1821,16 +1722,12 @@ export default class FridayPlugin extends Plugin {
 		window.open(`${base}/?${q.toString()}`);
 	}
 
-	async openCloudflareProjectsModal(): Promise<void> {
-		const { CloudflareProjectsModal } = await import('./projects/cloudflareProjectsModal');
-		new CloudflareProjectsModal(this.app, this).open();
-	}
-
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-		this.previousDownloadServer = this.settings.downloadServer;
-		if (!this.settings.cloudflareEnv) {
-			this.settings.cloudflareEnv = DEFAULT_CLOUDFLARE_ENV;
+		// Compile-time env always wins — ignore persisted cloudflareEnv / auto.
+		this.settings.cloudflareEnv = DEFAULT_CLOUDFLARE_ENV;
+		if (!this.settings.downloadServer) {
+			this.settings.downloadServer = 'global';
 		}
 		if (!this.settings.pathConfigs) {
 			this.settings.pathConfigs = {};
@@ -1845,37 +1742,14 @@ export default class FridayPlugin extends Plugin {
 	}
 
 	/**
-	 * Resolve cloudflareEnv → concrete endpoints, update settings + live Foundry client.
-	 * Call on startup, when the Environment dropdown changes, and before guest/publish.
+	 * Apply compile-time Cloudflare env → endpoints + live Foundry client.
+	 * No runtime switch; Key is never cleared by env changes.
 	 */
 	async applyCloudflareEnv(opts: { persist?: boolean; noticeOnSwitch?: boolean } = {}): Promise<CloudflareEnvResolved> {
-		const mode = this.settings.cloudflareEnv || 'auto';
-		const resolved = await resolveCloudflareEnv(mode);
+		const resolved = DEFAULT_CLOUDFLARE_ENV;
 		const endpoints = endpointsForEnv(resolved);
-		const prev = this.settings.cloudflareResolvedEnv;
-		const switched = prev != null && prev !== resolved;
 
-		if (switched && this.settings.mdfKey) {
-			this.settings.mdfKey = null;
-			this.settings.mdfKeyKind = null;
-			this.settings.mdfKeyPlan = null;
-			this.settings.mdfStorageBytes = null;
-			this.settings.mdfQuotaStorageBytes = null;
-			this.settings.mdfContentExpiresAt = null;
-			this.settings.mdfProjectCount = null;
-			this.settings.mdfQuotaMaxProjects = null;
-			this.settings.mdfQuotaRetentionDays = null;
-			this.settings.mdfQuotaMaxCustomDomains = null;
-			this.settings.mdfQuotaFeatures = null;
-			this.settings.mdfAccountEmail = null;
-			if (opts.noticeOnSwitch !== false) {
-				new Notice(
-					`Cloudflare env → ${resolved}; cleared Key (re-publish to get a new one).`,
-					5000,
-				);
-			}
-		}
-
+		this.settings.cloudflareEnv = resolved;
 		this.settings.cloudflareResolvedEnv = resolved;
 		this.settings.cloudflareApiBaseUrl = endpoints.apiBaseUrl;
 		this.settings.cloudflarePublicBaseUrl = endpoints.publicBaseUrl;
@@ -1937,17 +1811,10 @@ export default class FridayPlugin extends Plugin {
 	}
 
 	async saveSettings() {
-		const downloadServerChanged = this.previousDownloadServer !== this.settings.downloadServer;
-
 		await this.saveData(this.settings);
 		
 		if (Platform.isDesktop && this.foundryGlobalConfigService && this.absWorkspacePath) {
 			await this.saveSettingsToFoundryGlobalConfig();
-		}
-		
-		if (downloadServerChanged && Platform.isDesktop && this.themeApiService) {
-			this.themeApiService.clearCache();
-			this.previousDownloadServer = this.settings.downloadServer;
 		}
 	}
 	

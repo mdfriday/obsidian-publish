@@ -1,8 +1,6 @@
 /* MDFriday design tokens — design PNG sampled; Obsidian vars as soft fallbacks */
 .site-builder,
-.friday-setting-tab,
-.friday-theme-modal,
-.friday-cloudflare-projects-modal {
+.friday-setting-tab {
   --mdf-panel: #eff1f5;
   --mdf-card: #ffffff;
   --mdf-soft: #e7e9ee;

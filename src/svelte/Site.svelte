@@ -1,5 +1,5 @@
 <script lang="ts">
-	import {App, Notice, TFolder, TFile, FileSystemAdapter, requestUrl} from "obsidian";
+	import {App, Notice, TFolder, TFile} from "obsidian";
 	import FridayPlugin from "../main";
 	import PublishPanel from "./publish/PublishPanel.svelte";
 	import {onMount, onDestroy, tick} from "svelte";
@@ -12,8 +12,6 @@
 		selectionKindFromContents,
 	} from "../types/publish-config";
 	import * as path from "path";
-	import * as fs from "fs";
-	import JSZip from "jszip";
 	import {GetBaseUrl} from "../main";
 	import {themeApiService} from "../theme/themeApiService";
 	import type { CatalogEntry } from "../theme/types";
@@ -44,9 +42,6 @@
 	
 	// Reactive translation function
 	$: t = plugin.i18n?.t || ((key: string) => key);
-
-	const isWindows = process.platform === 'win32';
-	const FRIDAY_ROOT_FOLDER = 'MDFriday';
 
 	/** True when catalog siteParams are not yet reflected in project config.params. */
 	function configMissingSiteParams(
@@ -175,14 +170,8 @@
 	let themeList: CatalogEntry[] = [];
 	let themesLoading = false;
 
-	// Export related state
-	let isExporting = false;
-	
-	// Sample download related state
-	let isDownloadingSample = false;
-	let sampleDownloadProgress = 0;
 	let currentThemeWithSample: any = null;
-	
+
 	// Debounce timeout for auto-saving language configuration
 	let languageConfigSaveTimeout: ReturnType<typeof setTimeout> | null = null;
 	// Prevent infinite loop when saving language configuration
@@ -1606,90 +1595,9 @@
 		}
 	}
 	
-	function clearSiteAssets() {
-		site.clearSiteAssets();
-	}
-
-	function openThemeModal() {
-		plugin.showThemeSelectionModal(selectedThemeSlug, async (entry) => {
-			selectedThemeSlug = entry.slug;
-			selectedThemeName = entry.name;
-			selectedThemeDownloadUrl = entry.packUrl || '';
-			userHasSelectedTheme = true;
-			userChoseMode = true;
-			publishMode = 'themed';
-			currentThemeWithSample = entry;
-			await applyThemeFromCatalog(entry);
-		}, isForSingleFile);
-	}
-
-	async function downloadThemeSample() {
-		if (!currentThemeWithSample || !('demo_notes_url' in currentThemeWithSample) || !currentThemeWithSample.demo_notes_url) {
-			return;
-		}
-
-		isDownloadingSample = true;
-		sampleDownloadProgress = 0;
-
-		try {
-			// Ensure MDFriday root folder exists
-			await ensureRootFolderExists();
-
-			// Generate unique folder name
-			const baseName = currentThemeWithSample.name.toLowerCase().replace(/\s+/g, '-');
-			const targetFolderName = await generateUniqueFolderName(baseName);
-			
-			// Construct absolute path using plugin.vaultBasePath
-			let targetFolderPath: string;
-			
-			if (plugin.vaultBasePath) {
-				// Use absolute path to avoid vault root interpretation issues
-				targetFolderPath = path.join(plugin.vaultBasePath, FRIDAY_ROOT_FOLDER, targetFolderName);
-			} else {
-				// Fallback for non-FileSystemAdapter
-				targetFolderPath = path.join(FRIDAY_ROOT_FOLDER, targetFolderName);
-			}
-			
-			// Normalize path for Windows
-			if (isWindows) {
-				targetFolderPath = path.normalize(targetFolderPath);
-			}
-
-			// Download and unzip sample
-			await downloadAndUnzipSample(
-				currentThemeWithSample.demo_notes_url,
-				targetFolderPath,
-				(progress) => {
-					sampleDownloadProgress = progress;
-				}
-			);
-
-			new Notice(t('messages.sample_downloaded_successfully', {
-				themeName: currentThemeWithSample.name, 
-				folderName: targetFolderName 
-			}), 5000);
-
-		} catch (error) {
-			console.error('Sample download failed:', error);
-			console.error('Error details:', {
-				themeName: currentThemeWithSample?.name,
-				downloadUrl: currentThemeWithSample?.demo_notes_url,
-				platform: process.platform,
-				error: error.message
-			});
-			new Notice(t('messages.sample_download_failed', { error: error.message }), 5000);
-		} finally {
-			isDownloadingSample = false;
-			sampleDownloadProgress = 0;
-		}
-	}
-
 	// Reactive statement to ensure theme name updates
 	$: displayThemeName = selectedThemeName || 'Quartz';
 
-	function toggleAdvancedSettings() {
-		showAdvancedSettings = !showAdvancedSettings;
-	}
 
 	function normalizeSitePath(path: string): string {
 		// Ensure path starts with / and doesn't end with / (unless it's just "/")
@@ -2132,242 +2040,6 @@
 		if (!await app.vault.adapter.exists(themesDir)) {
 			await app.vault.adapter.mkdir(themesDir);
 		}
-	}
-
-	async function exportSite() {
-		if (!hasPreview || !absPreviewDir) {
-			new Notice(t('messages.please_generate_preview_first'), 3000);
-			return;
-		}
-
-		isExporting = true;
-
-		try {
-			// Create ZIP from public directory
-			const publicDir = path.join(absPreviewDir, 'public');
-			const zipContent = await createZipFromDirectory(publicDir);
-
-			// Use Electron's dialog API to show save dialog
-			const { dialog } = require('@electron/remote') || require('electron').remote;
-			const { canceled, filePath } = await dialog.showSaveDialog({
-				title: t('ui.export_site_dialog_title'),
-				defaultPath: 'mdfriday-site.zip',
-				filters: [
-					{ name: 'ZIP Files', extensions: ['zip'] },
-					{ name: 'All Files', extensions: ['*'] }
-				]
-			});
-
-			if (!canceled && filePath) {
-				// Save the ZIP file to the selected path
-				await fs.promises.writeFile(filePath, zipContent);
-				new Notice(t('messages.site_exported_successfully', { path: filePath }), 3000);
-			}
-
-		} catch (error) {
-			console.error('Export failed:', error);
-			new Notice(t('messages.export_failed', { error: error.message }), 5000);
-		} finally {
-			isExporting = false;
-		}
-	}
-
-	async function ensureRootFolderExists() {
-		// Ensure we're working with the vault root for the MDFriday folder
-		let rootFolderPath: string;
-		
-		if (plugin.vaultBasePath) {
-			// Use absolute path
-			rootFolderPath = path.join(plugin.vaultBasePath, FRIDAY_ROOT_FOLDER);
-		} else {
-			// Fallback for non-FileSystemAdapter
-			rootFolderPath = FRIDAY_ROOT_FOLDER;
-		}
-		
-		// For additional safety on Windows, ensure the path is properly normalized
-		if (isWindows) {
-			rootFolderPath = path.normalize(rootFolderPath);
-		}
-
-		const adapter = app.vault.adapter;
-		if (!(await adapter.exists(rootFolderPath))) {
-			// Use Node.js fs for absolute paths, adapter for relative paths
-			if (adapter instanceof FileSystemAdapter && path.isAbsolute(rootFolderPath)) {
-				await fs.promises.mkdir(rootFolderPath, { recursive: true });
-			} else {
-				await adapter.mkdir(rootFolderPath);
-			}
-		}
-	}
-
-	async function generateUniqueFolderName(baseName: string): Promise<string> {
-		let folderName = baseName;
-		let counter = 0;
-		
-		// Get the correct root folder path
-		let rootFolderPath: string;
-		
-		if (plugin.vaultBasePath) {
-			// Use absolute path
-			rootFolderPath = path.join(plugin.vaultBasePath, FRIDAY_ROOT_FOLDER);
-		} else {
-			// Fallback for non-FileSystemAdapter
-			rootFolderPath = FRIDAY_ROOT_FOLDER;
-		}
-		
-		// Normalize the base folder path for consistency
-		if (isWindows) {
-			rootFolderPath = path.normalize(rootFolderPath);
-		}
-
-		while (await checkFolderExists(path.join(rootFolderPath, folderName))) {
-			counter++;
-			folderName = `${baseName} ${counter}`;
-		}
-
-		return folderName;
-	}
-	
-	async function checkFolderExists(folderPath: string): Promise<boolean> {
-		const adapter = app.vault.adapter;
-		
-		if (adapter instanceof FileSystemAdapter && path.isAbsolute(folderPath)) {
-			// Use Node.js fs for absolute paths
-			try {
-				await fs.promises.access(folderPath);
-				return true;
-			} catch {
-				return false;
-			}
-		} else {
-			// Use adapter for relative paths
-			return await adapter.exists(folderPath);
-		}
-	}
-
-	async function downloadAndUnzipSample(
-		downloadUrl: string,
-		targetFolderPath: string,
-		progressCallback: (progress: number) => void
-	) {
-		try {
-			// Download the zip file
-			progressCallback(10);
-			const response = await requestUrl({
-				url: downloadUrl,
-				method: 'GET'
-			});
-
-			if (response.status !== 200) {
-				throw new Error(`Download failed with status: ${response.status}`);
-			}
-
-			progressCallback(50);
-
-			// Parse the zip file
-			const zip = new JSZip();
-			const zipData = await zip.loadAsync(response.arrayBuffer);
-
-			progressCallback(70);
-
-			// Create target folder using appropriate method based on path type
-			if (!(await checkFolderExists(targetFolderPath))) {
-				if (path.isAbsolute(targetFolderPath)) {
-					await fs.promises.mkdir(targetFolderPath, { recursive: true });
-				} else {
-					await app.vault.adapter.mkdir(targetFolderPath);
-				}
-			}
-
-			// Extract files
-			const files = Object.keys(zipData.files);
-			let processedFiles = 0;
-
-			for (const fileName of files) {
-				const file = zipData.files[fileName];
-				
-				// Normalize the file path for cross-platform compatibility
-				let normalizedFileName = fileName;
-				if (isWindows) {
-					// Replace forward slashes with backslashes for Windows
-					normalizedFileName = fileName.replace(/\//g, path.sep);
-				}
-				// Always normalize the path to handle any remaining issues
-				normalizedFileName = path.normalize(normalizedFileName);
-				
-				if (file.dir) {
-					// Create directory
-					const dirPath = path.join(targetFolderPath, normalizedFileName);
-					if (!(await checkFolderExists(dirPath))) {
-						if (path.isAbsolute(dirPath)) {
-							await fs.promises.mkdir(dirPath, { recursive: true });
-						} else {
-							await app.vault.adapter.mkdir(dirPath);
-						}
-					}
-				} else {
-					// Extract file
-					const filePath = path.join(targetFolderPath, normalizedFileName);
-					
-					// Ensure the parent directory exists before creating the file
-					const parentDir = path.dirname(filePath);
-					if (parentDir !== targetFolderPath && !(await checkFolderExists(parentDir))) {
-						if (path.isAbsolute(parentDir)) {
-							await fs.promises.mkdir(parentDir, { recursive: true });
-						} else {
-							await app.vault.adapter.mkdir(parentDir);
-						}
-					}
-					
-					const fileContent = await file.async('uint8array');
-					
-					// Write file using appropriate method
-					if (path.isAbsolute(filePath)) {
-						await fs.promises.writeFile(filePath, fileContent);
-					} else {
-						await app.vault.adapter.writeBinary(filePath, fileContent.buffer as ArrayBuffer);
-					}
-				}
-
-				processedFiles++;
-				const extractProgress = 70 + (processedFiles / files.length) * 30;
-				progressCallback(Math.round(extractProgress));
-			}
-
-			progressCallback(100);
-
-		} catch (error) {
-			console.error('Download and unzip failed:', error);
-			throw error;
-		}
-	}
-
-	async function createZipFromDirectory(sourceDir: string): Promise<Uint8Array> {
-		const zip = new JSZip();
-		
-		// Recursively add files to ZIP
-		const addDirectoryToZip = async (dirPath: string, zipFolder: JSZip) => {
-			const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
-			
-			for (const item of items) {
-				const itemPath = path.join(dirPath, item.name);
-				
-				if (item.isDirectory()) {
-					const subFolder = zipFolder.folder(item.name);
-					if (subFolder) {
-						await addDirectoryToZip(itemPath, subFolder);
-					}
-				} else if (item.isFile()) {
-					const fileContent = await fs.promises.readFile(itemPath);
-					zipFolder.file(item.name, new Uint8Array(fileContent));
-				}
-			}
-		};
-
-		await addDirectoryToZip(sourceDir, zip);
-		
-		// Generate ZIP file
-		return await zip.generateAsync({ type: 'uint8array' });
 	}
 
 	// Open publish URL in browser
