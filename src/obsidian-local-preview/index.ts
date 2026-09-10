@@ -12,8 +12,15 @@
  * Foundry themes stay on the existing Foundry MD path.
  */
 
-import type { Plugin, TFile } from 'obsidian';
-import { Component, FileSystemAdapter, MarkdownRenderer as ObsidianMarkdownRenderer } from 'obsidian';
+import type { Plugin } from 'obsidian';
+import {
+	Component,
+	FileSystemAdapter,
+	MarkdownRenderer as ObsidianMarkdownRenderer,
+	normalizePath,
+	Platform,
+	TFile,
+} from 'obsidian';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
@@ -21,6 +28,27 @@ import * as os from 'os';
 import { createHash } from 'crypto';
 import { resolveCdnBaseUrl } from '../cloudflare-env';
 import { buildEncryptGateHtml, encryptAESGCM } from './encrypt';
+
+/** File extensions treated as note attachments (images / media / pdf). */
+const NOTE_MEDIA_EXT = new Set([
+	'png',
+	'jpg',
+	'jpeg',
+	'gif',
+	'webp',
+	'svg',
+	'bmp',
+	'ico',
+	'avif',
+	'mp4',
+	'webm',
+	'mov',
+	'mp3',
+	'wav',
+	'ogg',
+	'm4a',
+	'pdf',
+]);
 
 function resolveFaithfulEncryptCdn(plugin: Plugin): string {
 	const settings = (plugin as { settings?: Parameters<typeof resolveCdnBaseUrl>[0] }).settings;
@@ -478,6 +506,7 @@ function collectLiveSheets(): string {
 
 /**
  * Copy a vault-relative path into assets/, return rewritten path.
+ * Text-oriented (theme CSS assets); prefer {@link copyVaultBinary} for media.
  */
 async function copyAsset(
 	plugin: Plugin,
@@ -496,6 +525,235 @@ async function copyAsset(
 	await fs.promises.writeFile(destAbs, content);
 	assetsMap.set(assetPath, destRel);
 	return { outPath: destRel, destAbs };
+}
+
+function stripUrlQueryHash(url: string): string {
+	const q = url.indexOf('?');
+	const h = url.indexOf('#');
+	let end = url.length;
+	if (q >= 0) end = Math.min(end, q);
+	if (h >= 0) end = Math.min(end, h);
+	return url.slice(0, end);
+}
+
+/**
+ * Map Obsidian resource / app:// / vault-relative src → vault-relative path.
+ */
+function resourceUrlToVaultPath(plugin: Plugin, rawSrc: string): string | null {
+	let src = rawSrc.trim();
+	if (!src || src.startsWith('data:') || src.startsWith('blob:')) return null;
+	if (/^https?:\/\//i.test(src)) return null;
+
+	try {
+		src = decodeURIComponent(stripUrlQueryHash(src));
+	} catch {
+		src = stripUrlQueryHash(src);
+	}
+
+	const adapter = plugin.app.vault.adapter;
+	const base =
+		adapter instanceof FileSystemAdapter ? adapter.getBasePath().replace(/\\/g, '/') : null;
+	const normAbs = (p: string) => p.replace(/\\/g, '/');
+
+	const prefix = Platform.resourcePathPrefix;
+	if (prefix && src.startsWith(prefix)) {
+		const rest = normAbs(src.slice(prefix.length));
+		if (base && (rest === base || rest.startsWith(`${base}/`))) {
+			return normalizePath(rest.slice(base.length).replace(/^\//, ''));
+		}
+		// Sometimes resource URL is vault-relative after the prefix
+		if (!rest.includes(':/') && !path.isAbsolute(rest)) {
+			return normalizePath(rest);
+		}
+	}
+
+	// Legacy: app://local/<abs-path>
+	const localMatch = /^app:\/\/local\/(.+)$/i.exec(src);
+	if (localMatch?.[1]) {
+		const rest = normAbs(localMatch[1]);
+		if (base && (rest === base || rest.startsWith(`${base}/`))) {
+			return normalizePath(rest.slice(base.length).replace(/^\//, ''));
+		}
+	}
+
+	// app://<id>/<abs-path> without relying on Platform.resourcePathPrefix
+	const appAbs = /^app:\/\/[^/]+\/(.+)$/i.exec(src);
+	if (appAbs?.[1] && base) {
+		const rest = normAbs(appAbs[1]);
+		if (rest === base || rest.startsWith(`${base}/`)) {
+			return normalizePath(rest.slice(base.length).replace(/^\//, ''));
+		}
+	}
+
+	// file:/// absolute
+	if (src.startsWith('file://') && base) {
+		let rest = normAbs(src.replace(/^file:\/\//i, ''));
+		// file:///Users/... on macOS
+		if (rest.startsWith('/') === false && /^[A-Za-z]:\//.test(rest) === false) {
+			rest = `/${rest}`;
+		}
+		if (rest === base || rest.startsWith(`${base}/`)) {
+			return normalizePath(rest.slice(base.length).replace(/^\//, ''));
+		}
+	}
+
+	// Plain vault-relative / linkpath (no scheme)
+	if (!src.includes('://')) {
+		return normalizePath(src.replace(/^\.\//, ''));
+	}
+
+	return null;
+}
+
+/**
+ * Copy a vault file as binary into assets/ (collision-safe hashed name).
+ */
+async function copyVaultBinary(
+	plugin: Plugin,
+	vaultRelPath: string,
+	assetsDir: string,
+	assetsMap: Map<string, string>,
+): Promise<string> {
+	const key = normalizePath(vaultRelPath);
+	const cached = assetsMap.get(key);
+	if (cached) return cached;
+
+	if (!(await plugin.app.vault.adapter.exists(key))) {
+		throw new Error(`media missing: ${key}`);
+	}
+
+	const hash = createHash('sha1').update(key).digest('hex').slice(0, 8);
+	const base = path.basename(key).replace(/[^\w.-]/g, '_');
+	const destName = `${hash}-${base}`;
+	const destRel = path.join('assets', destName);
+	const destAbs = path.join(assetsDir, destName);
+
+	await fs.promises.mkdir(assetsDir, { recursive: true });
+	const data = await plugin.app.vault.adapter.readBinary(key);
+	await fs.promises.writeFile(destAbs, Buffer.from(data));
+	assetsMap.set(key, destRel);
+	return destRel;
+}
+
+function isNoteMediaFile(file: TFile): boolean {
+	return NOTE_MEDIA_EXT.has(file.extension.toLowerCase());
+}
+
+/**
+ * Collect vault media referenced by the note (embeds + markdown images),
+ * copy into assets/, rewrite HTML src to package-relative paths.
+ */
+async function packageNoteMedia(
+	plugin: Plugin,
+	note: TFile,
+	html: string,
+	assetsDir: string,
+): Promise<string> {
+	const assetsMap = new Map<string, string>();
+	/** Obsidian resource URL (with/without query) → package-relative assets/... */
+	const srcRewrite = new Map<string, string>();
+
+	const registerFile = async (file: TFile): Promise<string | null> => {
+		if (!isNoteMediaFile(file)) return null;
+		try {
+			const out = await copyVaultBinary(plugin, file.path, assetsDir, assetsMap);
+			const resource = plugin.app.vault.getResourcePath(file);
+			srcRewrite.set(resource, out);
+			srcRewrite.set(stripUrlQueryHash(resource), out);
+			srcRewrite.set(file.path, out);
+			srcRewrite.set(normalizePath(file.path), out);
+			return out;
+		} catch {
+			return null;
+		}
+	};
+
+	// 1) Embeds from metadata cache (![[image.png]], etc.)
+	const cache = plugin.app.metadataCache.getFileCache(note);
+	for (const embed of cache?.embeds ?? []) {
+		const linkpath = embed.link.split('#')[0]?.split('|')[0]?.trim();
+		if (!linkpath) continue;
+		const dest = plugin.app.metadataCache.getFirstLinkpathDest(linkpath, note.path);
+		if (dest instanceof TFile) {
+			await registerFile(dest);
+		}
+	}
+
+	// 2) Markdown image links from source (![](path) / ![alt](path))
+	try {
+		const source = await plugin.app.vault.read(note);
+		const mdImg = /!\[[^\]]*]\(\s*<?([^)\s>]+)>?\s*\)/g;
+		let m: RegExpExecArray | null;
+		while ((m = mdImg.exec(source))) {
+			const raw = m[1]?.trim();
+			if (!raw || /^https?:\/\//i.test(raw) || raw.startsWith('data:')) continue;
+			const linkpath = decodeURIComponent(stripUrlQueryHash(raw));
+			const dest =
+				plugin.app.metadataCache.getFirstLinkpathDest(linkpath, note.path) ??
+				plugin.app.vault.getAbstractFileByPath(normalizePath(linkpath));
+			if (dest instanceof TFile) {
+				await registerFile(dest);
+			}
+		}
+	} catch {
+		// ignore source scan failures
+	}
+
+	// 3) Rewrite HTML media attributes
+	const doc = new DOMParser().parseFromString(
+		`<div id="mdf-media-root">${html}</div>`,
+		'text/html',
+	);
+	const root = doc.getElementById('mdf-media-root');
+	if (!root) return html;
+
+	const mediaEls = root.querySelectorAll(
+		'img[src], video[src], audio[src], source[src], .internal-embed[src]',
+	);
+
+	for (const el of Array.from(mediaEls)) {
+		const rawSrc = el.getAttribute('src');
+		if (!rawSrc) continue;
+
+		let out = srcRewrite.get(rawSrc) ?? srcRewrite.get(stripUrlQueryHash(rawSrc));
+
+		if (!out) {
+			const vaultRel = resourceUrlToVaultPath(plugin, rawSrc);
+			if (vaultRel) {
+				out = srcRewrite.get(vaultRel);
+				if (!out) {
+					const abs = plugin.app.vault.getAbstractFileByPath(vaultRel);
+					if (abs instanceof TFile) {
+						out = (await registerFile(abs)) ?? undefined;
+					} else {
+						const linkDest = plugin.app.metadataCache.getFirstLinkpathDest(
+							vaultRel,
+							note.path,
+						);
+						if (linkDest instanceof TFile) {
+							out = (await registerFile(linkDest)) ?? undefined;
+						}
+					}
+				}
+				// Last resort: copy by vault path even if not in file index
+				if (!out) {
+					try {
+						out = await copyVaultBinary(plugin, vaultRel, assetsDir, assetsMap);
+						srcRewrite.set(rawSrc, out);
+						srcRewrite.set(stripUrlQueryHash(rawSrc), out);
+					} catch {
+						out = undefined;
+					}
+				}
+			}
+		}
+
+		if (out) {
+			el.setAttribute('src', out.split(path.sep).join('/'));
+		}
+	}
+
+	return root.innerHTML;
 }
 
 /**
@@ -871,11 +1129,12 @@ export async function writeFaithfulPackage(
 	const themeClassAttr = allThemeClasses.join(' ');
 
 	const rendered = await renderNoteWithObsidian(plugin, file, source, allThemeClasses);
+	const htmlWithMedia = await packageNoteMedia(plugin, file, rendered.html, assetsDir);
 
 	const contentInner = `
   <div class="obsidian-content-wrapper">
     <div class="markdown-preview-view markdown-rendered ${escapeHtml(themeClassAttr)}">
-      ${rendered.html}
+      ${htmlWithMedia}
     </div>
   </div>
   <footer class="mdfriday-built-with">
