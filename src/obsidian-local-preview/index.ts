@@ -70,6 +70,12 @@ export type ThemeSnapshot = {
 		vars: string;
 		core: string;
 		plugins: string;
+		/**
+		 * Document-injected CSS collected at package time (after note render).
+		 * Covers runtime styles from renderers / plugins (e.g. math CHTML sheets)
+		 * that are not present as vault theme/plugin files.
+		 */
+		runtime: string;
 	};
 	assets: { relativePath: string; absolutePath: string }[];
 	manifest: {
@@ -467,41 +473,165 @@ async function collectActivePluginStyles(plugin: Plugin): Promise<string> {
 	return parts.join('\n\n');
 }
 
+/** Stable fingerprint for CSS dedupe (whitespace-normalized). */
+function cssFingerprint(css: string): string {
+	return createHash('sha1')
+		.update(css.replace(/\s+/g, ' ').trim())
+		.digest('hex');
+}
+
+function buildCssExcludeFingerprints(layers: string[]): Set<string> {
+	const out = new Set<string>();
+	for (const layer of layers) {
+		const t = layer?.trim();
+		if (!t) continue;
+		out.add(cssFingerprint(t));
+	}
+	return out;
+}
+
 /**
- * Collect live theme + plugin CSS sheets (excluding app.css if already collected).
- * Prefer CSSOM (applied theme), then fall back to inline <style> tags.
+ * True when a live sheet is vault/app CSS we already package as a file layer
+ * (linked stylesheet), so it should not go into the runtime bucket.
  */
-function collectLiveSheets(): string {
+function isPackagedStylesheetHref(href: string | null): boolean {
+	if (!href) return false;
+	const h = href.toLowerCase();
+	if (h.includes('app.css')) return true;
+	if (h.startsWith('app://') || h.startsWith('file://')) return true;
+	// Vault / plugin file sheets — already covered by theme/snippets/plugins collectors
+	if (h.includes('/themes/') || h.includes('/snippets/') || h.includes('/plugins/')) {
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Collect CSS injected into the live Obsidian document at runtime.
+ *
+ * Extensible contract (no vendor-specific names):
+ * - Prefer sheets without a packaged file href (inline / blob / data) — typical
+ *   of renderers and plugins that inject <style> at runtime.
+ * - Skip sheets already represented by vault/app CSS layers via fingerprint.
+ *
+ * Call after MarkdownRenderer so late injectors have run.
+ */
+function collectRuntimeInjectedCss(excludeLayers: string[]): string {
+	const exclude = buildCssExcludeFingerprints(excludeLayers);
+	const seen = new Set<string>();
 	const parts: string[] = [];
+
+	const pushUnique = (raw: string | null | undefined) => {
+		const text = raw?.trim();
+		if (!text || text.length < 8) return;
+		const fp = cssFingerprint(text);
+		if (exclude.has(fp) || seen.has(fp)) return;
+		seen.add(fp);
+		parts.push(text);
+	};
+
 	for (const sheet of Array.from(document.styleSheets)) {
 		try {
-			if (sheet.href && sheet.href.includes('app.css')) continue;
+			if (isPackagedStylesheetHref(sheet.href)) continue;
+			// Linked http(s) CDN sheets are left as external; runtime bucket is for in-document CSS
+			if (sheet.href && /^https?:\/\//i.test(sheet.href)) continue;
+
 			if (sheet.cssRules) {
+				const rules: string[] = [];
 				for (const rule of Array.from(sheet.cssRules)) {
-					parts.push(rule.cssText);
+					rules.push(rule.cssText);
 				}
+				pushUnique(rules.join('\n'));
 			}
 		} catch {
-			// CORS / restricted stylesheet — try href-less rule extraction via textContent if available
 			try {
-				// Some engines expose cssText even when cssRules is blocked.
 				const anySheet = sheet as CSSStyleSheet & { cssText?: string };
-				if (anySheet.cssText && anySheet.cssText.trim().length > 0) {
-					parts.push(anySheet.cssText);
-				}
+				if (anySheet.cssText?.trim()) pushUnique(anySheet.cssText);
 			} catch {
-				// ignore
+				// ignore restricted sheets
 			}
 		}
 	}
-	// Obsidian may inject theme CSS as a <style> tag (not always exposed via CSSOM)
+
+	// Inline <style> nodes (CSSOM may omit or block some injectors)
 	for (const styleEl of Array.from(document.querySelectorAll('style'))) {
-		const text = styleEl.textContent?.trim();
-		if (text && text.length > 0) {
-			parts.push(text);
+		pushUnique(styleEl.textContent);
+	}
+
+	return parts.join('\n\n');
+}
+
+/**
+ * Copy url(...) assets referenced by a CSS string into assetsDir; return rewritten CSS.
+ */
+async function rewriteAndCopyCssAssets(
+	plugin: Plugin,
+	css: string,
+	assetsDir: string,
+	assetsMap: Map<string, string>,
+	assets: ThemeSnapshot['assets'],
+	themeName: string | null,
+	themePublicHints: Set<string>,
+): Promise<string> {
+	const urls = [...new Set(collectCssUrls(css))];
+	for (const u of urls) {
+		if (u.startsWith('/') || u.startsWith('http') || u.startsWith('data:')) continue;
+		const copied = await copyAssetBestEffort(
+			plugin,
+			u,
+			assetsDir,
+			assetsMap,
+			themeName,
+			themePublicHints,
+		);
+		if (copied) {
+			if (!assets.some((a) => a.relativePath === copied.outPath)) {
+				assets.push({
+					relativePath: copied.outPath,
+					absolutePath: copied.destAbs,
+				});
+			}
 		}
 	}
-	return parts.join('\n\n');
+	return rewriteCssUrls(css, assetsMap, [...themePublicHints]);
+}
+
+/**
+ * After note render: attach runtime-injected CSS into an existing snapshot.
+ * Safe to call multiple times; replaces snapshot.css.runtime.
+ */
+export async function attachRuntimeInjectedCss(
+	plugin: Plugin,
+	snapshot: ThemeSnapshot,
+	assetsDir: string,
+): Promise<ThemeSnapshot> {
+	const excludeLayers = [
+		snapshot.css.core,
+		snapshot.css.theme,
+		snapshot.css.snippets,
+		snapshot.css.plugins,
+		snapshot.css.vars,
+	];
+	const raw = collectRuntimeInjectedCss(excludeLayers);
+	if (!raw.trim()) {
+		snapshot.css.runtime = '';
+		return snapshot;
+	}
+
+	const assetsMap = new Map<string, string>();
+	const themePublicHints = new Set<string>();
+	const rewritten = await rewriteAndCopyCssAssets(
+		plugin,
+		raw,
+		assetsDir,
+		assetsMap,
+		snapshot.assets,
+		snapshot.sourceTheme,
+		themePublicHints,
+	);
+	snapshot.css.runtime = rewritten;
+	snapshot.manifest.assetCount = snapshot.assets.length;
+	return snapshot;
 }
 
 /**
@@ -819,28 +949,22 @@ export async function exportThemeSnapshot(
 ): Promise<ThemeSnapshot> {
 	const appearance = await collectAppearance(plugin);
 	const coreCss = await collectCoreCss(plugin);
-	const liveSheets = collectLiveSheets();
 	const vars = collectCssVars();
 	const pluginStyles = await collectActivePluginStyles(plugin);
 
-	// Prefer vault theme.css (self-contained). Live CSSOM may be incomplete
-	// (CORS, missing rules, empty when theme not selected).
+	// Vault theme.css is the theme layer. Runtime-injected sheets (math, etc.)
+	// are attached later via attachRuntimeInjectedCss after note render.
 	const themeName = appearance.themeName || null;
 	const themeFileCss = await resolveThemeCssFile(plugin, themeName);
-	// Prefer theme file; fall back to live sheets. Live sheets alone often miss
-	// theme CSS when appearance.cssTheme is empty or theme not selected.
-	const themeCss = themeFileCss.content || liveSheets;
+	const themeCss = themeFileCss.content;
 	const snippetsCss = appearance.snippets.join('\n\n');
 
-	// Assets: scan CSS for fonts/images (relative). Prefer vault-relative
-	// public/ paths first (theme fonts often use theme-root-relative URLs).
 	const allCss = [coreCss, themeCss, snippetsCss, pluginStyles].join('\n');
 	const urls = [...new Set(collectCssUrls(allCss))];
 	await fs.promises.mkdir(assetsDir, { recursive: true });
 	const assetsMap = new Map<string, string>();
 	const assets: ThemeSnapshot['assets'] = [];
 
-	// Theme folder-relative assets: public/fonts/... under .obsidian/themes/
 	const themePublicHints = new Set<string>();
 	if (themeFileCss.name) {
 		for (const u of urls) {
@@ -850,31 +974,42 @@ export async function exportThemeSnapshot(
 		}
 	}
 
-	for (const u of urls) {
-		// Skip absolute / already data
-		if (u.startsWith('/') || u.startsWith('http') || u.startsWith('data:')) continue;
-		const copied = await copyAssetBestEffort(
-			plugin,
-			u,
-			assetsDir,
-			assetsMap,
-			themeFileCss.name,
-			themePublicHints,
-		);
-		if (copied) {
-			assets.push({
-				relativePath: copied.outPath,
-				absolutePath: copied.destAbs,
-			});
-		}
-	}
-
-	const themeRewritten = rewriteCssUrls(themeCss, assetsMap, [
-		...themePublicHints,
-	]);
-	const snippetsRewritten = rewriteCssUrls(snippetsCss, assetsMap);
-	const coreRewritten = rewriteCssUrls(coreCss, assetsMap);
-	const pluginsRewritten = rewriteCssUrls(pluginStyles, assetsMap);
+	const themeRewritten = await rewriteAndCopyCssAssets(
+		plugin,
+		themeCss,
+		assetsDir,
+		assetsMap,
+		assets,
+		themeFileCss.name,
+		themePublicHints,
+	);
+	const snippetsRewritten = await rewriteAndCopyCssAssets(
+		plugin,
+		snippetsCss,
+		assetsDir,
+		assetsMap,
+		assets,
+		themeFileCss.name,
+		themePublicHints,
+	);
+	const coreRewritten = await rewriteAndCopyCssAssets(
+		plugin,
+		coreCss,
+		assetsDir,
+		assetsMap,
+		assets,
+		themeFileCss.name,
+		themePublicHints,
+	);
+	const pluginsRewritten = await rewriteAndCopyCssAssets(
+		plugin,
+		pluginStyles,
+		assetsDir,
+		assetsMap,
+		assets,
+		themeFileCss.name,
+		themePublicHints,
+	);
 
 	const snapshot: ThemeSnapshot = {
 		generatedAt: Date.now(),
@@ -887,6 +1022,7 @@ export async function exportThemeSnapshot(
 			vars,
 			core: coreRewritten,
 			plugins: pluginsRewritten,
+			runtime: '',
 		},
 		assets,
 		manifest: {
@@ -988,6 +1124,7 @@ export async function writeThemeSnapshot(
 	snippetsCssPath: string;
 	varsCssPath: string;
 	coreCssPath: string;
+	runtimeCssPath: string;
 	manifestPath: string;
 }> {
 	await fs.promises.mkdir(snapshotDir, { recursive: true });
@@ -995,12 +1132,14 @@ export async function writeThemeSnapshot(
 	const snippetsCssPath = path.join(snapshotDir, 'snippets.css');
 	const varsCssPath = path.join(snapshotDir, 'vars.css');
 	const coreCssPath = path.join(snapshotDir, 'obsidian-core.css');
+	const runtimeCssPath = path.join(snapshotDir, 'runtime.css');
 	const manifestPath = path.join(snapshotDir, 'manifest.json');
 
 	await fs.promises.writeFile(themeCssPath, snapshot.css.theme);
 	await fs.promises.writeFile(snippetsCssPath, snapshot.css.snippets);
 	await fs.promises.writeFile(varsCssPath, snapshot.css.vars);
 	await fs.promises.writeFile(coreCssPath, snapshot.css.core);
+	await fs.promises.writeFile(runtimeCssPath, snapshot.css.runtime || '');
 	await fs.promises.writeFile(
 		manifestPath,
 		JSON.stringify(snapshot.manifest, null, 2),
@@ -1010,6 +1149,7 @@ export async function writeThemeSnapshot(
 		snippetsCssPath,
 		varsCssPath,
 		coreCssPath,
+		runtimeCssPath,
 		manifestPath,
 	};
 }
@@ -1119,7 +1259,6 @@ export async function writeFaithfulPackage(
 	const assetsDir = path.join(absRoot, 'assets');
 	const snapshot = await exportThemeSnapshot(plugin, assetsDir);
 	const snapshotDir = path.join(absRoot, 'theme-snapshot');
-	await writeThemeSnapshot(snapshotDir, snapshot);
 
 	const source = await plugin.app.vault.read(file);
 	const themeClasses = detectThemeClasses(snapshot.css.theme);
@@ -1129,6 +1268,10 @@ export async function writeFaithfulPackage(
 	const themeClassAttr = allThemeClasses.join(' ');
 
 	const rendered = await renderNoteWithObsidian(plugin, file, source, allThemeClasses);
+	// Runtime injectors (math CHTML, etc.) run during/after render — collect then.
+	await attachRuntimeInjectedCss(plugin, snapshot, assetsDir);
+	await writeThemeSnapshot(snapshotDir, snapshot);
+
 	const htmlWithMedia = await packageNoteMedia(plugin, file, rendered.html, assetsDir);
 
 	const contentInner = `
@@ -1177,6 +1320,8 @@ ${snapshot.css.theme}
 ${snapshot.css.snippets}
 /* plugin styles */
 ${snapshot.css.plugins}
+/* runtime (document-injected: math / renderers / plugins) */
+${snapshot.css.runtime}
 /* vars */
 ${snapshot.css.vars}
 /* page */

@@ -15,8 +15,8 @@ const prod = process.argv[2] === 'production'
 // watch/dev → staging (fsky.top); production build → production (mdfriday.com)
 // Override: MDF_CF_ENV=local|staging|production
 const defaultCfEnv = process.env.MDF_CF_ENV || (prod ? 'production' : 'staging')
-// Change this to your local Obsidian plugin path for development
-const pluginDir = path.join(process.env.HOME || '', 'Desktop', 'obsidian-test', '.obsidian', 'plugins', 'mdfriday-publish');
+// Change this to your local Obsidian plugin path for development github/mdfriday/workspace/demo-vault
+const pluginDir = path.join(process.env.HOME || '', 'github', 'mdfriday', 'workspace', 'demo-vault', '.obsidian', 'plugins', 'mdfriday-publish');
 
 const renameCssFile = (cssPath, targetPath) => {
 	try {
