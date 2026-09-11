@@ -28,27 +28,11 @@ import * as os from 'os';
 import { createHash } from 'crypto';
 import { resolveCdnBaseUrl } from '../cloudflare-env';
 import { buildEncryptGateHtml, encryptAESGCM } from './encrypt';
-
-/** File extensions treated as note attachments (images / media / pdf). */
-const NOTE_MEDIA_EXT = new Set([
-	'png',
-	'jpg',
-	'jpeg',
-	'gif',
-	'webp',
-	'svg',
-	'bmp',
-	'ico',
-	'avif',
-	'mp4',
-	'webm',
-	'mov',
-	'mp3',
-	'wav',
-	'ogg',
-	'm4a',
-	'pdf',
-]);
+import {
+	collectNoteMediaFiles,
+	isNoteMediaFile,
+	stripUrlQueryHash,
+} from '../media/note-media';
 
 function resolveFaithfulEncryptCdn(plugin: Plugin): string {
 	const settings = (plugin as { settings?: Parameters<typeof resolveCdnBaseUrl>[0] }).settings;
@@ -657,15 +641,6 @@ async function copyAsset(
 	return { outPath: destRel, destAbs };
 }
 
-function stripUrlQueryHash(url: string): string {
-	const q = url.indexOf('?');
-	const h = url.indexOf('#');
-	let end = url.length;
-	if (q >= 0) end = Math.min(end, q);
-	if (h >= 0) end = Math.min(end, h);
-	return url.slice(0, end);
-}
-
 /**
  * Map Obsidian resource / app:// / vault-relative src → vault-relative path.
  */
@@ -765,10 +740,6 @@ async function copyVaultBinary(
 	return destRel;
 }
 
-function isNoteMediaFile(file: TFile): boolean {
-	return NOTE_MEDIA_EXT.has(file.extension.toLowerCase());
-}
-
 /**
  * Collect vault media referenced by the note (embeds + markdown images),
  * copy into assets/, rewrite HTML src to package-relative paths.
@@ -798,38 +769,12 @@ async function packageNoteMedia(
 		}
 	};
 
-	// 1) Embeds from metadata cache (![[image.png]], etc.)
-	const cache = plugin.app.metadataCache.getFileCache(note);
-	for (const embed of cache?.embeds ?? []) {
-		const linkpath = embed.link.split('#')[0]?.split('|')[0]?.trim();
-		if (!linkpath) continue;
-		const dest = plugin.app.metadataCache.getFirstLinkpathDest(linkpath, note.path);
-		if (dest instanceof TFile) {
-			await registerFile(dest);
-		}
+	// 1) Shared collector: embeds (![[…]]) + markdown images
+	for (const file of await collectNoteMediaFiles(plugin, note)) {
+		await registerFile(file);
 	}
 
-	// 2) Markdown image links from source (![](path) / ![alt](path))
-	try {
-		const source = await plugin.app.vault.read(note);
-		const mdImg = /!\[[^\]]*]\(\s*<?([^)\s>]+)>?\s*\)/g;
-		let m: RegExpExecArray | null;
-		while ((m = mdImg.exec(source))) {
-			const raw = m[1]?.trim();
-			if (!raw || /^https?:\/\//i.test(raw) || raw.startsWith('data:')) continue;
-			const linkpath = decodeURIComponent(stripUrlQueryHash(raw));
-			const dest =
-				plugin.app.metadataCache.getFirstLinkpathDest(linkpath, note.path) ??
-				plugin.app.vault.getAbstractFileByPath(normalizePath(linkpath));
-			if (dest instanceof TFile) {
-				await registerFile(dest);
-			}
-		}
-	} catch {
-		// ignore source scan failures
-	}
-
-	// 3) Rewrite HTML media attributes
+	// 2) Rewrite HTML media attributes
 	const doc = new DOMParser().parseFromString(
 		`<div id="mdf-media-root">${html}</div>`,
 		'text/html',

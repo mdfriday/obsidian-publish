@@ -1,6 +1,6 @@
 import type FridayPlugin from '../main';
-import {Notice, requestUrl} from 'obsidian';
-import type {TFile, TFolder} from 'obsidian';
+import {Notice, requestUrl, TFile} from 'obsidian';
+import type {TFolder} from 'obsidian';
 import type {ObsidianProjectCreateOptions} from '@mdfriday/foundry';
 import type {ProgressUpdate, PublishProgressUpdate} from '../types/events';
 import {joinPath} from '../utils/common';
@@ -12,6 +12,16 @@ import {
 	mergeMdfridayParams,
 } from '../theme/user-static-sync';
 import { CLOUDFLARE_ENV_PRESETS } from '../cloudflare-env';
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+	collectNoteMediaFiles,
+	markProjectFileLinkSkipSync,
+	NOTE_MEDIA_STATIC_PREFIX,
+	rewriteNoteSourceForStagedMedia,
+	stageNoteMediaToStatic,
+	writeRewrittenNoteContent,
+} from '../media/note-media';
 
 /** Share mode baseURL per arch/03-build-contract.md */
 export function computeShareBaseUrl(publicBaseUrl: string, siteId: string): string {
@@ -236,6 +246,79 @@ export class ProjectServiceManager {
 			console.error('[ProjectServiceManager] Error saving config:', error);
 			return false;
 		}
+	}
+
+	/**
+	 * Themed single-note: copy referenced vault media into project static/media/
+	 * and rewrite content/index.md so Foundry SSG can resolve local images.
+	 *
+	 * Folder projects are skipped. When the content target was a symlink it is
+	 * materialized (watch-on-vault is not preserved for this path — by design for now).
+	 */
+	async prepareThemedSingleNoteMedia(projectName: string): Promise<void> {
+		try {
+			const result = await this.plugin.foundryProjectService.getProjectInfo(
+				this.plugin.absWorkspacePath,
+				projectName,
+			);
+			if (!result.success || !result.data?.fileLink) {
+				return;
+			}
+
+			const { path: projectPath, fileLink } = result.data;
+			const note = this.resolveFileLinkNote(fileLink.sourcePath);
+			if (!note) {
+				return;
+			}
+
+			const staticDir = path.join(projectPath, 'static');
+			const mediaRoot = path.join(staticDir, NOTE_MEDIA_STATIC_PREFIX);
+			const files = await collectNoteMediaFiles(this.plugin, note);
+
+			if (files.length === 0) {
+				await fs.promises.rm(mediaRoot, { recursive: true, force: true });
+				// Restore pristine vault text when a previous run materialized content.
+				try {
+					const st = await fs.promises.lstat(fileLink.targetPath);
+					if (!st.isSymbolicLink()) {
+						const source = await this.plugin.app.vault.read(note);
+						await fs.promises.writeFile(fileLink.targetPath, source, 'utf8');
+					}
+				} catch {
+					// ignore restore failures
+				}
+				return;
+			}
+
+			const staged = await stageNoteMediaToStatic(this.plugin, files, staticDir);
+			const source = await this.plugin.app.vault.read(note);
+			const rewritten = rewriteNoteSourceForStagedMedia(
+				this.plugin,
+				note,
+				source,
+				staged,
+			);
+
+			await writeRewrittenNoteContent(fileLink.targetPath, rewritten);
+			// Prevent Foundry copyFile sync from clobbering rewritten content.
+			await markProjectFileLinkSkipSync(projectPath);
+		} catch (error) {
+			console.warn('[ProjectServiceManager] prepareThemedSingleNoteMedia failed:', error);
+		}
+	}
+
+	private resolveFileLinkNote(sourcePath: string): TFile | null {
+		const candidates = [
+			this.plugin.getVaultRelativePath(sourcePath),
+			sourcePath,
+		];
+		for (const candidate of candidates) {
+			const abs = this.plugin.app.vault.getAbstractFileByPath(candidate);
+			if (abs instanceof TFile && abs.extension === 'md') {
+				return abs;
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -843,6 +926,7 @@ export class ProjectServiceManager {
 		onProgress?: (progress: ProgressUpdate) => void
 	): Promise<BuildResult> {
 		try {
+			await this.prepareThemedSingleNoteMedia(projectName);
 			await this.syncUserStaticConfig(projectName);
 			const result = await this.plugin.foundryBuildService.buildProject({
 				workspacePath: this.plugin.absWorkspacePath,
@@ -897,6 +981,8 @@ export class ProjectServiceManager {
 				};
 			}
 		}
+
+		await this.prepareThemedSingleNoteMedia(projectName);
 
 		const result = await this.plugin.foundryServeService.startServer(
 			{
