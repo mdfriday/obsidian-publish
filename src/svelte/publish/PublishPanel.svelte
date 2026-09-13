@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type FridayPlugin from '../../main';
-	import { resolveAccountBaseUrl } from '../../cloudflare-env';
 	import type { PublishMode, SelectionKind } from '../../types/publish-config';
 	import type { CatalogEntry } from '../../theme/types';
 	import { TFile, TFolder } from 'obsidian';
@@ -72,7 +71,7 @@
 	export let onOpenPreview: () => void;
 	export let onCopyPreview: () => void;
 	export let onContinueAuth: () => void;
-	export let onOpenAccount: () => void;
+	export let onOpenAccount: (opts?: { intent?: 'claim' | 'upgrade' }) => void | Promise<void>;
 	export let onDomainActive: (hostname: string) => void;
 	export let onDomainCleared: (() => void) | undefined = undefined;
 	export let onDismissResult: () => void;
@@ -154,7 +153,6 @@
 			? 'published'
 			: 'unpublished') as 'published' | 'unpublished' | 'revoked';
 	$: previewLive = hasPreview && !!previewUrl && !isPreviewBuilding;
-	$: accountUrl = (plugin.cloudflareEnvEpoch, resolveAccountBaseUrl(plugin.settings));
 
 	$: if (sitePassword) passwordOn = true;
 
@@ -199,13 +197,15 @@
 	$: bannerCtaLabel =
 		planTier === 'guest' ? t('ui.plan_cta_claim_sites') : t('ui.plan_cta_upgrade_sites');
 
-	function accountUrlWithKey(extra = '') {
-		const key = plugin.settings.mdfKey;
-		const q = new URLSearchParams();
-		if (key) q.set('key', key);
-		if (extra === 'upgrade') q.set('upgrade', 'personal');
-		const qs = q.toString();
-		return qs ? `${accountUrl}/?${qs}` : `${accountUrl}/`;
+	async function openClaimAccount(e?: MouseEvent) {
+		e?.stopPropagation();
+		await onOpenAccount({ intent: 'claim' });
+		onClaimStarted?.();
+	}
+
+	async function openUpgradeAccount(e?: MouseEvent) {
+		e?.stopPropagation();
+		await onOpenAccount({ intent: 'upgrade' });
 	}
 
 	function togglePlan(e?: MouseEvent) {
@@ -328,20 +328,13 @@
 		planOpen = true;
 	}
 
-	function openClaimAccount(e?: MouseEvent) {
-		e?.stopPropagation();
-		const url = accountUrlWithKey();
-		window.open(url, '_blank', 'noopener');
-		onClaimStarted?.();
-	}
-
 	function onQuotaCta(e?: MouseEvent) {
 		e?.stopPropagation();
 		if (publishErrorAction === 'claim_free' || planTier === 'guest') {
-			openClaimAccount(e);
+			void openClaimAccount(e);
 			return;
 		}
-		window.open(accountUrlWithKey('upgrade'), '_blank', 'noopener');
+		void openUpgradeAccount(e);
 	}
 
 	function toggleAdvanced() {
@@ -486,9 +479,9 @@
 						<li class="note">{t('ui.plan_free_note')}</li>
 					</ul>
 					{#if planTier === 'free'}
-						<button type="button" class="pp-cta current-cta" on:click={onOpenAccount}>{t('ui.account_manage')}</button>
+						<button type="button" class="pp-cta current-cta" on:click={() => onOpenAccount({ intent: 'claim' })}>{t('ui.account_manage')}</button>
 					{:else}
-						<a class="pp-cta" href={accountUrlWithKey()} target="_blank" rel="noopener">{t('ui.plan_cta_claim_sites')}</a>
+						<button type="button" class="pp-cta" on:click={openClaimAccount}>{t('ui.plan_cta_claim_sites')}</button>
 					{/if}
 				</div>
 
@@ -508,9 +501,9 @@
 						<li>{t('ui.plan_personal_b5')}</li>
 					</ul>
 					{#if planTier === 'personal'}
-						<button type="button" class="pp-cta current-cta" on:click={onOpenAccount}>{t('ui.account_manage_sub')}</button>
+						<button type="button" class="pp-cta current-cta" on:click={() => onOpenAccount({ intent: 'claim' })}>{t('ui.account_manage_sub')}</button>
 					{:else}
-						<a class="pp-cta" href={accountUrlWithKey('upgrade')} target="_blank" rel="noopener">{t('ui.plan_cta_upgrade_sites')}</a>
+						<button type="button" class="pp-cta" on:click={openUpgradeAccount}>{t('ui.plan_cta_upgrade_sites')}</button>
 					{/if}
 				</div>
 
@@ -852,12 +845,7 @@
 							{#if isGuest}
 								<button type="button" class="link ub-cta" on:click={openClaimAccount}>{bannerCtaLabel}</button>
 							{:else}
-								<a
-									class="link ub-cta"
-									href={accountUrlWithKey('upgrade')}
-									target="_blank"
-									rel="noopener">{bannerCtaLabel}</a
-								>
+								<button type="button" class="link ub-cta" on:click={openUpgradeAccount}>{bannerCtaLabel}</button>
 							{/if}
 						</div>
 					</div>
@@ -1087,11 +1075,8 @@
 					</div>
 					<div class="hl-title">{t('ui.history_locked_title')}</div>
 					<div class="hl-desc">{t('ui.history_locked_desc')}</div>
-					<a
-						class="btn btn-primary btn-pill"
-						href={accountUrlWithKey('upgrade')}
-						target="_blank"
-						rel="noopener">{t('ui.account_upgrade_personal')}</a
+					<button type="button" class="btn btn-primary btn-pill" on:click={openUpgradeAccount}
+						>{t('ui.account_upgrade_personal')}</button
 					>
 				</div>
 			{:else}

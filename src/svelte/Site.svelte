@@ -1010,8 +1010,10 @@
 		}
 	}
 
-	async function openAccountFromGrowth() {
-		await plugin.openAccountInBrowser();
+	async function openAccountFromGrowth(opts?: { intent?: 'claim' | 'upgrade' }) {
+		await plugin.openAccountInBrowser({
+			intent: opts?.intent === 'upgrade' ? 'upgrade' : 'claim',
+		});
 	}
 
 	function needsGuestKeySetup(): boolean {

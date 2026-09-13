@@ -1748,15 +1748,33 @@ export default class FridayPlugin extends Plugin {
 		this.viewInitialized = false;
 	}
 
-	async openAccountInBrowser(opts?: { upgrade?: 'personal' }): Promise<void> {
+	/**
+	 * Open Account in the system browser for plugin claim / upgrade.
+	 * Always ensures an MDF Key first (Turnstile + guest if needed) so Free/Personal
+	 * CTAs do not depend on a prior Verify & publish.
+	 */
+	async openAccountInBrowser(opts?: {
+		intent?: 'claim' | 'upgrade';
+		/** @deprecated use intent: 'upgrade' */
+		upgrade?: 'personal';
+	}): Promise<void> {
 		const mgr = this.projectServiceManager;
 		if (!mgr) return;
+		const intent: 'claim' | 'upgrade' =
+			opts?.intent === 'upgrade' || opts?.upgrade === 'personal' ? 'upgrade' : 'claim';
 		const key =
 			this.settings.mdfKey || (await mgr.ensureMdfKey({ interactive: true }));
 		if (!key) return;
 		const base = resolveAccountBaseUrl(this.settings);
-		const q = new URLSearchParams({ key });
-		if (opts?.upgrade === 'personal') q.set('upgrade', 'personal');
+		const q = new URLSearchParams({
+			intent,
+			key,
+			source: 'obsidian',
+		});
+		if (intent === 'upgrade') {
+			q.set('plan', 'personal');
+			q.set('upgrade', 'personal'); // compat with older Account pages
+		}
 		window.open(`${base}/?${q.toString()}`);
 	}
 

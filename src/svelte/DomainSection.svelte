@@ -364,7 +364,7 @@
 	}
 
 	async function openAccountUpgrade() {
-		await plugin.openAccountInBrowser({ upgrade: 'personal' });
+		await plugin.openAccountInBrowser({ intent: 'upgrade' });
 	}
 
 	function resetLocalDomainState(next: DomainStep) {
