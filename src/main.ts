@@ -245,6 +245,13 @@ export default class FridayPlugin extends Plugin {
 				(event === 'claim' && statusOk) ||
 				(event === 'upgrade' && statusOk);
 			if (accountRefreshOk) {
+				const delivered = typeof params.key === 'string' ? params.key.trim() : '';
+				if (delivered.startsWith('MDF_')) {
+					this.settings.mdfKey = delivered;
+					this.settings.mdfKeyKind = 'user';
+					await this.saveSettings();
+					this.foundryPublishService?.setKey?.(delivered, 'user');
+				}
 				const mgr = this.projectServiceManager;
 				if (mgr) {
 					const r = await mgr.refreshCloudflareAccount();
@@ -1750,27 +1757,25 @@ export default class FridayPlugin extends Plugin {
 
 	/**
 	 * Open Account in the system browser for plugin claim / upgrade.
-	 * Always ensures an MDF Key first (Turnstile + guest if needed) so Free/Personal
-	 * CTAs do not depend on a prior Verify & publish.
+	 * - With a local Key: pass it for claim / upgrade (Guest→Free or paid).
+	 * - Without a Key: open intent-only URL (no Turnstile / Guest mint).
+	 *   Account mints a user MDF_ Key after Google and returns it via deep link.
+	 * Guest Turnstile stays on Verify & publish via ensureMdfKey / requestGuestKey.
 	 */
 	async openAccountInBrowser(opts?: {
 		intent?: 'claim' | 'upgrade';
 		/** @deprecated use intent: 'upgrade' */
 		upgrade?: 'personal';
 	}): Promise<void> {
-		const mgr = this.projectServiceManager;
-		if (!mgr) return;
 		const intent: 'claim' | 'upgrade' =
 			opts?.intent === 'upgrade' || opts?.upgrade === 'personal' ? 'upgrade' : 'claim';
-		const key =
-			this.settings.mdfKey || (await mgr.ensureMdfKey({ interactive: true }));
-		if (!key) return;
+		const key = this.settings.mdfKey || null;
 		const base = resolveAccountBaseUrl(this.settings);
 		const q = new URLSearchParams({
 			intent,
-			key,
 			source: 'obsidian',
 		});
+		if (key) q.set('key', key);
 		if (intent === 'upgrade') {
 			q.set('plan', 'personal');
 			q.set('upgrade', 'personal'); // compat with older Account pages
