@@ -1,42 +1,39 @@
 # MDFriday Publish
 
-Turn your Obsidian notes and folders into shareable websites.
+**One click. Turn notes into websites.**
 
-This plugin is the **publish** half of the former Friday plugin (sync lives in [obsidian-sync](https://github.com/mdfriday/obsidian-sync)). It reuses the Friday publish UI and Foundry local build, and publishes via the **Cloudflare V2** control plane (Guest → share URL; Google / Creem later).
+Publish a note or a folder from Obsidian as a website. No Git. No GitHub. No build pipelines. Just right click and publish.
 
-## Features (M1)
+## Publish a note exactly as you see it in Obsidian
+![GIF: Publish a Note as-is](assets/as-is.gif)
 
-- Select a note or folder, choose a theme, preview locally
-- **Guest publish** — no account required; get a public `share.*` URL
-- Persist guest token so re-publish updates the same site
-- Optional Netlify / FTP (legacy paths kept)
+## Publish a note with selected theme
+![GIF: Publish a Note with theme](assets/note-theme.gif)
 
-## Develop
+## Publish a folder as a Wiki
+![GIF: Publish a Wiki](assets/wiki.gif)
 
-```bash
-# Link local Foundry (Cloudflare guest APIs)
-cd ../foundry && npm run build
-cd ../obsidian-publish
-npm install
-npm run build
-```
+## Why MDFriday Publish?
 
-Copy `main.js`, `manifest.json`, and `styles.css` into your vault’s `.obsidian/plugins/mdfriday-publish/`, or set `pluginDir` in `esbuild.config.mjs` and run `npm run dev`.
+Obsidian is great for creating knowledge.
+Sharing that knowledge is often much harder.
+Many publishing solutions require:
 
-```bash
-npm run lint
-npm run check
-```
+* Git
+* GitHub
+* Static site generators
+* Deployment workflows
+* Theme configuration
 
-## Staging defaults
+MDFriday Publish removes that complexity.
+Publish directly from Obsidian with a single click.
 
-| Setting | Default |
-| --- | --- |
-| API | `https://api.fsky.top` |
-| Share | `https://share.fsky.top` |
+## Learn More
 
-Override under Settings → Publish → Cloudflare (advanced).
+- Website: https://mdfriday.com
+- Documentation: https://help.mdfriday.com
+- GitHub: https://github.com/mdfriday
 
 ## License
 
-Apache-2.0
+Apache 2.0
