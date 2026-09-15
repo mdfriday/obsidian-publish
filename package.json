@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-publish",
-	"version": "26.8.25",
+	"version": "26.9.1",
 	"description": "MDFriday Publish — turn Obsidian notes and folders into shareable websites via Cloudflare. Desktop.",
 	"main": "main.js",
 	"type": "module",
@@ -47,6 +47,6 @@
 		"typescript-eslint": "^8.63.0"
 	},
 	"dependencies": {
-		"@mdfriday/foundry": "file:../foundry"
+		"@mdfriday/foundry": "^26.9.1"
 	}
 }

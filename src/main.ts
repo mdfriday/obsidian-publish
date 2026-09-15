@@ -1,4 +1,4 @@
-import {FileSystemAdapter, MarkdownView, Menu, Notice, Platform, Plugin, setIcon, TAbstractFile, TFile, TFolder} from 'obsidian';
+import {FileSystemAdapter, MarkdownView, Menu, Notice, Platform, Plugin, TAbstractFile, TFile, TFolder} from 'obsidian';
 import * as path from 'path';
 import {I18nService} from "./i18n";
 import {FridaySettingTab} from "./setting";
@@ -37,6 +37,7 @@ import {
 	DEFAULT_CLOUDFLARE_ENV,
 	type CloudflareEnvResolved,
 	endpointsForEnv,
+	logLevelForCloudflareEnv,
 	resolveAccountBaseUrl,
 } from './cloudflare-env';
 
@@ -467,7 +468,20 @@ export default class FridayPlugin extends Plugin {
 				createObsidianAuthService,
 				createObsidianLicenseService,
 				createObsidianDomainService,
+				LogLevel,
+				setGlobalLogLevel,
 			} = await import('@mdfriday/foundry');
+
+		// Quiet in production builds; staging/local keep INFO/DEBUG for diagnostics
+		{
+			const name = logLevelForCloudflareEnv(DEFAULT_CLOUDFLARE_ENV);
+			const level =
+				name === 'debug' ? LogLevel.DEBUG
+				: name === 'info' ? LogLevel.INFO
+				: name === 'warn' ? LogLevel.WARN
+				: LogLevel.ERROR;
+			setGlobalLogLevel(level);
+		}
 			
 		// Create workspace service（无需参数，使用 Node.js 默认实现）
 		this.workspaceService = createObsidianWorkspaceService();
@@ -574,6 +588,17 @@ export default class FridayPlugin extends Plugin {
 				createObsidianLicenseService,
 				createObsidianGlobalConfigService,
 			} = await import('@mdfriday/foundry/obsidian/mobile');
+
+			{
+				const { LogLevel, setGlobalLogLevel } = await import('@mdfriday/foundry');
+				const name = logLevelForCloudflareEnv(DEFAULT_CLOUDFLARE_ENV);
+				const level =
+					name === 'debug' ? LogLevel.DEBUG
+					: name === 'info' ? LogLevel.INFO
+					: name === 'warn' ? LogLevel.WARN
+					: LogLevel.ERROR;
+				setGlobalLogLevel(level);
+			}
 			
 			// 1. 创建 Mobile repositories
 			const workspaceRepo = new ObsidianMobileWorkspaceRepository(
@@ -1476,39 +1501,41 @@ export default class FridayPlugin extends Plugin {
 	 * Opens a menu with publish-to-web and add-to-list options.
 	 */
 	private addInternetIconToView(view: MarkdownView) {
-		const viewActionsEl = view.containerEl.querySelector('.view-actions');
-		if (!viewActionsEl) return;
+		return;
 
-		// Remove existing icon if present (ensures click handler is updated)
-		const existingIcon = viewActionsEl.querySelector('.friday-internet-icon');
-		if (existingIcon) {
-			existingIcon.remove();
-		}
-
-		// Create the internet icon button
-		const iconEl = createEl('a');
-		iconEl.className = 'clickable-icon view-action friday-internet-icon';
-		iconEl.setAttribute('aria-label', this.i18n.t('menu.publish_options'));
-		setIcon(iconEl, 'globe');
-
-		// Add click handler to show publish menu
-		iconEl.addEventListener('click', (e) => {
-			e.preventDefault();
-
-			const file = view.file;
-			if (!file) {
-				console.warn("[Friday] No file found in view");
-				return;
-			}
-
-			// Create a menu — single Publish to MDFriday entry
-			const menu = new Menu();
-			this.addPublishMenuItems(menu, file);
-			menu.showAtMouseEvent(e);
-		});
-
-		// Insert at the beginning of view-actions (left side)
-		viewActionsEl.insertBefore(iconEl, viewActionsEl.firstChild);
+		// const viewActionsEl = view.containerEl.querySelector('.view-actions');
+		// if (!viewActionsEl) return;
+		//
+		// // Remove existing icon if present (ensures click handler is updated)
+		// const existingIcon = viewActionsEl.querySelector('.friday-internet-icon');
+		// if (existingIcon) {
+		// 	existingIcon.remove();
+		// }
+		//
+		// // Create the internet icon button
+		// const iconEl = createEl('a');
+		// iconEl.className = 'clickable-icon view-action friday-internet-icon';
+		// iconEl.setAttribute('aria-label', this.i18n.t('menu.publish_options'));
+		// setIcon(iconEl, 'globe');
+		//
+		// // Add click handler to show publish menu
+		// iconEl.addEventListener('click', (e) => {
+		// 	e.preventDefault();
+		//
+		// 	const file = view.file;
+		// 	if (!file) {
+		// 		console.warn("[Friday] No file found in view");
+		// 		return;
+		// 	}
+		//
+		// 	// Create a menu — single Publish to MDFriday entry
+		// 	const menu = new Menu();
+		// 	this.addPublishMenuItems(menu, file);
+		// 	menu.showAtMouseEvent(e);
+		// });
+		//
+		// // Insert at the beginning of view-actions (left side)
+		// viewActionsEl.insertBefore(iconEl, viewActionsEl.firstChild);
 	}
 
 	/**
@@ -1764,11 +1791,9 @@ export default class FridayPlugin extends Plugin {
 	 */
 	async openAccountInBrowser(opts?: {
 		intent?: 'claim' | 'upgrade';
-		/** @deprecated use intent: 'upgrade' */
-		upgrade?: 'personal';
 	}): Promise<void> {
 		const intent: 'claim' | 'upgrade' =
-			opts?.intent === 'upgrade' || opts?.upgrade === 'personal' ? 'upgrade' : 'claim';
+			opts?.intent === 'upgrade' ? 'upgrade' : 'claim';
 		const key = this.settings.mdfKey || null;
 		const base = resolveAccountBaseUrl(this.settings);
 		const q = new URLSearchParams({

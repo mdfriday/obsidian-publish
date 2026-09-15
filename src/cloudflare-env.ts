@@ -130,3 +130,24 @@ export function resolveSiteBaseUrl(settings?: EnvSettings): string {
 	const env = settings ? resolvedFromSettings(settings) : DEFAULT_CLOUDFLARE_ENV;
 	return endpointsForEnv(env).siteBaseUrl.replace(/\/$/, '');
 }
+
+/**
+ * Foundry log level mapped from compile-time Cloudflare env.
+ * production → error (quiet for users); staging → info; local → debug.
+ */
+export type FoundryLogLevelName = 'debug' | 'info' | 'warn' | 'error';
+
+export function logLevelForCloudflareEnv(
+	env: CloudflareEnvResolved = DEFAULT_CLOUDFLARE_ENV,
+): FoundryLogLevelName {
+	switch (env) {
+		case 'production':
+			return 'error';
+		case 'local':
+			return 'debug';
+		case 'staging':
+		default:
+			return 'info';
+	}
+}
+
