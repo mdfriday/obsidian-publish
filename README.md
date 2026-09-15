@@ -4,6 +4,10 @@
 
 Publish a note or a folder from Obsidian as a website. No Git. No GitHub. No build pipelines. Just right click and publish.
 
+## Help us improve MDFriday Publish
+
+- Discord: https://discord.gg/t9F93FChT
+
 ## Publish a note exactly as you see it in Obsidian
 ![GIF: Publish a Note as-is](assets/as-is.gif)
 
