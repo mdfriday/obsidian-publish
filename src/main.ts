@@ -349,7 +349,7 @@ export default class FridayPlugin extends Plugin {
 		
 		try {
 			this.registerView(FRIDAY_SERVER_VIEW_TYPE, leaf => new ServerView(leaf, this));
-		} catch (_e) {
+		} catch {
 			console.error('[Friday] View already registered, skipping');
 		}
 		
