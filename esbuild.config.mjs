@@ -117,6 +117,12 @@ const buildOptions = {
 	alias: {
 		// Node 'events' → browser polyfill (Foundry / chokidar)
 		'events': 'events',
+		// JSZip → setimmediate / lie→immediate: legacy polyfills use createElement('script').
+		// Stub with queueMicrotask / MessageChannel so Obsidian review does not flag them.
+		// Force jszip lib entry so require('setimmediate') stays a separate module (not inlined min).
+		'jszip': path.resolve('node_modules/jszip/lib/index.js'),
+		'setimmediate': path.resolve('src/shims/setimmediate.cjs'),
+		'immediate': path.resolve('src/shims/immediate.cjs'),
 	},
 	platform: 'browser',
 	mainFields: ['browser', 'module', 'main'],

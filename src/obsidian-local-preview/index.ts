@@ -1067,6 +1067,7 @@ async function copyAssetBestEffort(
 
 /**
  * Write Theme Snapshot to disk for offline preview.
+ * Meta file is snapshot.json (not Obsidian plugin manifest.json).
  */
 export async function writeThemeSnapshot(
 	snapshotDir: string,
@@ -1085,7 +1086,7 @@ export async function writeThemeSnapshot(
 	const varsCssPath = path.join(snapshotDir, 'vars.css');
 	const coreCssPath = path.join(snapshotDir, 'obsidian-core.css');
 	const runtimeCssPath = path.join(snapshotDir, 'runtime.css');
-	const manifestPath = path.join(snapshotDir, 'manifest.json');
+	const manifestPath = path.join(snapshotDir, 'snapshot.json');
 
 	await fs.promises.writeFile(themeCssPath, snapshot.css.theme);
 	await fs.promises.writeFile(snippetsCssPath, snapshot.css.snippets);
