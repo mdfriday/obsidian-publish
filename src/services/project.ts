@@ -598,7 +598,7 @@ export class ProjectServiceManager {
 	async loginWithUserToken(_userJwt: string): Promise<{ success: boolean; error?: string; plan?: string }> {
 		return {
 			success: false,
-			error: 'Use Account login (opens mdfriday.com). Plugin only stores MDF Key.',
+			error: 'Use Account login (opens the MDFriday account page). Plugin only stores MDF Key.',
 		};
 	}
 
@@ -842,7 +842,7 @@ export class ProjectServiceManager {
 		} catch (e) {
 			const raw = e instanceof Error ? e.message : String(e);
 			const hint = /NAME_NOT_RESOLVED|ENOTFOUND|getaddrinfo/i.test(raw)
-				? ` DNS failed for ${apiBase}. Check Cloudflare environment (Staging vs Local) and that api.fsky.top resolves.`
+				? ` DNS failed for ${apiBase}. Check Cloudflare environment and that the API host resolves.`
 				: '';
 			return { success: false, error: `${raw} (${url})${hint}` };
 		}

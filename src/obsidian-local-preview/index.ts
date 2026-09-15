@@ -26,7 +26,12 @@ import * as http from 'http';
 import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'crypto';
-import { resolveCdnBaseUrl } from '../cloudflare-env';
+import {
+	DEFAULT_CLOUDFLARE_ENV,
+	endpointsForEnv,
+	resolveCdnBaseUrl,
+	resolveSiteBaseUrl,
+} from '../cloudflare-env';
 import { buildEncryptGateHtml, encryptAESGCM } from './encrypt';
 import {
 	collectNoteMediaFiles,
@@ -36,7 +41,9 @@ import {
 
 function resolveFaithfulEncryptCdn(plugin: Plugin): string {
 	const settings = (plugin as { settings?: Parameters<typeof resolveCdnBaseUrl>[0] }).settings;
-	return settings ? resolveCdnBaseUrl(settings) : 'https://cdn.fsky.top';
+	return settings
+		? resolveCdnBaseUrl(settings)
+		: endpointsForEnv(DEFAULT_CLOUDFLARE_ENV).cdnBaseUrl.replace(/\/$/, '');
 }
 
 function vaultConfigDir(plugin: Plugin): string {
@@ -1226,7 +1233,7 @@ export async function writeFaithfulPackage(
     </div>
   </div>
   <footer class="mdfriday-built-with">
-    Built with <a href="https://mdfriday.com" target="_blank" rel="noopener noreferrer">MDFriday</a>
+    Built with <a href="${resolveSiteBaseUrl((plugin as { settings?: Parameters<typeof resolveSiteBaseUrl>[0] }).settings)}" target="_blank" rel="noopener noreferrer">MDFriday</a>
   </footer>`;
 
 	const password = (opts.password || '').trim();

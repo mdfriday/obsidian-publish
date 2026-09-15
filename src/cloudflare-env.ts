@@ -13,6 +13,8 @@ export interface CloudflareEndpoints {
 	apiBaseUrl: string;
 	publicBaseUrl: string;
 	accountBaseUrl: string;
+	/** Marketing / www origin (themes catalog, demos, brand link). */
+	siteBaseUrl: string;
 	/** Hosted Turnstile challenge (HTTPS). Empty for local (skip). */
 	guestChallengeUrl: string;
 	/** Theme / base static assets (pack chrome, encrypt gate, …). */
@@ -36,6 +38,7 @@ export const CLOUDFLARE_ENV_PRESETS: Record<CloudflareEnvResolved, CloudflareEnd
 		apiBaseUrl: 'http://127.0.0.1:8787',
 		publicBaseUrl: 'http://127.0.0.1:8788',
 		accountBaseUrl: 'http://127.0.0.1:8080/account',
+		siteBaseUrl: 'http://127.0.0.1:8080',
 		guestChallengeUrl: '',
 		// Local Foundry still loads published theme chrome from staging CDN.
 		cdnBaseUrl: 'https://cdn.fsky.top',
@@ -44,6 +47,7 @@ export const CLOUDFLARE_ENV_PRESETS: Record<CloudflareEnvResolved, CloudflareEnd
 		apiBaseUrl: 'https://api.fsky.top',
 		publicBaseUrl: 'https://share.fsky.top',
 		accountBaseUrl: 'https://fsky.top/account',
+		siteBaseUrl: 'https://fsky.top',
 		guestChallengeUrl: 'https://fsky.top/guest-challenge/',
 		cdnBaseUrl: 'https://cdn.fsky.top',
 	},
@@ -51,6 +55,7 @@ export const CLOUDFLARE_ENV_PRESETS: Record<CloudflareEnvResolved, CloudflareEnd
 		apiBaseUrl: 'https://api.mdfriday.com',
 		publicBaseUrl: 'https://share.mdfriday.com',
 		accountBaseUrl: 'https://mdfriday.com/account',
+		siteBaseUrl: 'https://mdfriday.com',
 		guestChallengeUrl: 'https://mdfriday.com/guest-challenge/',
 		cdnBaseUrl: 'https://cdn.mdfriday.com',
 	},
@@ -118,4 +123,10 @@ export function resolvePublicBaseUrl(settings: EnvSettings): string {
 /** Theme CDN origin for base/family static assets (encrypt gate, pack chrome). */
 export function resolveCdnBaseUrl(settings: EnvSettings): string {
 	return endpointsForEnv(resolvedFromSettings(settings)).cdnBaseUrl.replace(/\/$/, '');
+}
+
+/** Marketing site origin (themes, demos, brand) for the compile-time / resolved env. */
+export function resolveSiteBaseUrl(settings?: EnvSettings): string {
+	const env = settings ? resolvedFromSettings(settings) : DEFAULT_CLOUDFLARE_ENV;
+	return endpointsForEnv(env).siteBaseUrl.replace(/\/$/, '');
 }

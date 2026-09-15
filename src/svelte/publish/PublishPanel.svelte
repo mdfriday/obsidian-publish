@@ -6,6 +6,7 @@
 	import DomainSection from '../DomainSection.svelte';
 	import HistorySection from '../HistorySection.svelte';
 	import { filterThemesForSelection } from '../../utils/theme';
+	import { resolveSiteBaseUrl } from '../../cloudflare-env';
 	import { onDestroy, onMount } from 'svelte';
 
 	export let plugin: FridayPlugin;
@@ -352,7 +353,12 @@
 
 	function demoUrl(entry: CatalogEntry): string {
 		if (entry.demoUrl) return entry.demoUrl;
-		return `https://mdfriday.com/demo/${entry.slug}/index.html`;
+		const site = resolveSiteBaseUrl(plugin.settings);
+		return `${site}/demo/${entry.slug}/index.html`;
+	}
+
+	function siteHomeUrl(): string {
+		return resolveSiteBaseUrl(plugin.settings);
 	}
 
 	function openDemo(e: MouseEvent, entry: CatalogEntry) {
@@ -386,7 +392,7 @@
 			<header class="mdf-brand-header">
 				<a
 					class="mdf-brand-link"
-					href="https://mdfriday.com"
+					href={siteHomeUrl()}
 					target="_blank"
 					rel="noopener noreferrer"
 					title="MDFriday"

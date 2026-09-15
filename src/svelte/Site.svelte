@@ -17,7 +17,7 @@
 	import type { CatalogEntry } from "../theme/types";
 	import type { ProjectState, ProgressUpdate, PublishProgressUpdate } from "../types/events";
 	import { buildThemeConfigPatch } from "../theme/theme-config";
-	import { resolvePublicBaseUrl } from "../cloudflare-env";
+	import { resolvePublicBaseUrl, resolveSiteBaseUrl } from "../cloudflare-env";
 	import { DEFAULT_THEME_SLUGS, filterThemesForSelection } from "../utils/theme";
 	import {
 		buildFaithfulToProject,
@@ -671,6 +671,7 @@
 		buildProgress = 100;
 		isBuilding = false;
 		isPreviewBuilding = false;
+		if (result.port) serverPort = result.port;
 		previewUrl = normalizeLocalPreviewUrl(result.url || '', result.port || serverPort);
 		outputTab = 'preview';
 		previewWasStopped = false;
@@ -909,7 +910,8 @@
 
 	// HTTP server related
 	let serverRunning = false;
-	let serverPort = 8090;
+	/** Bound preview port after listen(0); 0 means ask OS for an ephemeral port. */
+	let serverPort = 0;
 
 	onMount(async () => {
 		themesDir = path.join(plugin.pluginDir, 'themes')
@@ -1206,7 +1208,7 @@
 	}
 
 	function openThemesCatalog() {
-		window.open('https://mdfriday.com/themes', '_blank');
+		window.open(`${resolveSiteBaseUrl(plugin.settings)}/themes`, '_blank');
 	}
 
 	$: displaySiteTitle = siteName || plugin.currentProjectName || 'MDFriday';

@@ -2,7 +2,11 @@
  * Theme catalog — CDN public snapshot (C7) + API entitlement/packUrl merge.
  */
 
-import { resolveCdnBaseUrl } from '../cloudflare-env';
+import {
+	DEFAULT_CLOUDFLARE_ENV,
+	endpointsForEnv,
+	resolveCdnBaseUrl,
+} from '../cloudflare-env';
 import type FridayPlugin from '../main';
 import {
 	entitlementContextFromApi,
@@ -30,18 +34,14 @@ function catalogApiBase(plugin?: FridayPlugin): string {
 	if (plugin?.licenseState?.getApiUrl()) {
 		return plugin.licenseState.getApiUrl().replace(/\/$/, '');
 	}
-	return 'https://api.fsky.top';
+	return endpointsForEnv(DEFAULT_CLOUDFLARE_ENV).apiBaseUrl.replace(/\/$/, '');
 }
 
-function catalogCdnBase(plugin?: FridayPlugin, apiBase?: string): string {
+function catalogCdnBase(plugin?: FridayPlugin, _apiBase?: string): string {
 	if (plugin?.settings) {
 		return resolveCdnBaseUrl(plugin.settings);
 	}
-	const base = apiBase || '';
-	if (base.includes('fsky.top') || base.includes('127.0.0.1')) {
-		return 'https://cdn.fsky.top';
-	}
-	return 'https://cdn.mdfriday.com';
+	return endpointsForEnv(DEFAULT_CLOUDFLARE_ENV).cdnBaseUrl.replace(/\/$/, '');
 }
 
 function authHeaders(plugin?: FridayPlugin): Record<string, string> {
