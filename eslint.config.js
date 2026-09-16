@@ -93,6 +93,18 @@ export default defineConfig([
 		},
 	},
 
+
+	// ── JSZip async shims: Node/globalThis polyfills, not Obsidian UI ─────────
+	// Replaces setimmediate/immediate DOM script fallbacks for review; popout
+	// timer / window rules do not apply to these platform polyfills.
+	{
+		files: ["src/shims/**"],
+		rules: {
+			"obsidianmd/prefer-window-timers": "off",
+			"obsidianmd/no-global-this": "off",
+		},
+	},
+
 	// ── Local preview: native fetch required for app:// assets ──────────────
 	// Obsidian requestUrl cannot load app://obsidian.md/* (core CSS / fonts).
 	// Faithful As-is packaging must use native fetch for those protocol URLs.
