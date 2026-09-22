@@ -46,6 +46,7 @@
 		"typescript-eslint": "^8.63.0"
 	},
 	"dependencies": {
-		"@mdfriday/foundry": "^26.9.3"
+		"@mdfriday/foundry": "^26.9.3",
+		"jszip": "^3.10.1"
 	}
 }

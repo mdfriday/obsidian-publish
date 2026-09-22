@@ -217,10 +217,7 @@ export default class FridayPlugin extends Plugin {
 		reject: (err: Error) => void;
 		timer: ReturnType<typeof setTimeout>;
 	} | null = null;
-	
-	// View management state
-	private viewInitialized: boolean = false
-	
+
 	// Dynamic module references for PC-only features
 	private themeApiService?: typeof import("./theme/themeApiService").themeApiService
 
@@ -352,25 +349,19 @@ export default class FridayPlugin extends Plugin {
 		} catch {
 			console.error('[Friday] View already registered, skipping');
 		}
-		
-		this.app.workspace.onLayoutReady(() => this.initLeaf());
-		
-		// Add internet icon to markdown view header
+
+		// Do not auto-open the sidebar on startup — only on explicit user action
+		// (context menu, sidebar tab toggle, or commands that call activateView).
+
+		// When user focuses the Friday sidebar tab, sync panel to the active note
+		// without forcing the sidebar open (it is already being revealed by Obsidian).
 		this.registerEvent(
 			this.app.workspace.on('active-leaf-change', (leaf) => {
-				if (leaf?.view instanceof MarkdownView) {
-					this.addInternetIconToView(leaf.view);
-				}
-			})
+				if (leaf?.view?.getViewType() !== FRIDAY_SERVER_VIEW_TYPE) return;
+				void this.syncPanelToActiveFile();
+			}),
 		);
-		
-		this.app.workspace.onLayoutReady(() => {
-			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (activeView) {
-				this.addInternetIconToView(activeView);
-			}
-		});
-		
+
 		// Register context menu for files and folders (PC-only):
 		// Open in MDFriday (config) + Publish to MDFriday (auto publish).
 		this.registerEvent(
@@ -679,22 +670,41 @@ export default class FridayPlugin extends Plugin {
 	}
 
 	/**
+	 * Soft-sync panel selection to the workspace active markdown file.
+	 * Never expands or reveals the sidebar — used when the user already opened the panel.
+	 */
+	async syncPanelToActiveFile(): Promise<void> {
+		if (this.isProjectInitializing) return;
+		const file = this.app.workspace.getActiveFile();
+		if (!(file instanceof TFile) || file.extension !== 'md') return;
+		const contents = this.site?.getCurrentContents?.() ?? [];
+		const currentPath = contents[0]?.file?.path ?? contents[0]?.folder?.path ?? null;
+		if (currentPath === file.path) return;
+		await this.openOrFollowSelection(null, file, { createIfMissing: false, reveal: false });
+	}
+
+	/**
 	 * Open or soft-follow a vault selection in the publish sidebar.
 	 * createIfMissing=false (file-open): update UI only; load existing project if path matches.
 	 * createIfMissing=true (menu / publish): create local Foundry project when needed.
+	 * reveal defaults to createIfMissing — soft-follow never pops the sidebar.
 	 */
 	async openOrFollowSelection(
 		folder: TFolder | null,
 		file: TFile | null,
-		opts: { createIfMissing: boolean },
+		opts: { createIfMissing: boolean; reveal?: boolean },
 	) {
 		const epoch = ++this.selectionEpoch;
-		const rightSplit = this.app.workspace.rightSplit;
-		if (!rightSplit) {
-			return;
-		}
-		if (rightSplit.collapsed) {
-			rightSplit.expand();
+		const reveal = opts.reveal ?? opts.createIfMissing;
+
+		if (reveal) {
+			const rightSplit = this.app.workspace.rightSplit;
+			if (!rightSplit) {
+				return;
+			}
+			if (rightSplit.collapsed) {
+				rightSplit.expand();
+			}
 		}
 
 		const vaultPath = normalizeVaultPath(folder?.path ?? file?.path ?? null);
@@ -710,7 +720,9 @@ export default class FridayPlugin extends Plugin {
 			this.site.clearAllContent(true);
 			await this.applyFoundryProjectToPanel(existingByPath, folder, file, epoch);
 			if (epoch !== this.selectionEpoch) return;
-			await this.activateView();
+			if (reveal) {
+				await this.activateView();
+			}
 			this.siteComponent?.notifyTargetsChanged?.();
 			return;
 		}
@@ -723,7 +735,6 @@ export default class FridayPlugin extends Plugin {
 				this.site.clearAllContent(true);
 				this.site.replaceSelection(folder, file);
 			}
-			await this.activateView();
 			this.siteComponent?.notifyTargetsChanged?.();
 			return;
 		}
@@ -777,7 +788,9 @@ export default class FridayPlugin extends Plugin {
 		}
 
 		if (epoch !== this.selectionEpoch) return;
-		await this.activateView();
+		if (reveal) {
+			await this.activateView();
+		}
 		this.siteComponent?.notifyTargetsChanged?.();
 	}
 
@@ -1497,51 +1510,6 @@ export default class FridayPlugin extends Plugin {
 	}
 
 	/**
-	 * Add internet icon to markdown view header.
-	 * Opens a menu with publish-to-web and add-to-list options.
-	 */
-	private addInternetIconToView(view: MarkdownView) {
-		return;
-
-		// const viewActionsEl = view.containerEl.querySelector('.view-actions');
-		// if (!viewActionsEl) return;
-		//
-		// // Remove existing icon if present (ensures click handler is updated)
-		// const existingIcon = viewActionsEl.querySelector('.friday-internet-icon');
-		// if (existingIcon) {
-		// 	existingIcon.remove();
-		// }
-		//
-		// // Create the internet icon button
-		// const iconEl = createEl('a');
-		// iconEl.className = 'clickable-icon view-action friday-internet-icon';
-		// iconEl.setAttribute('aria-label', this.i18n.t('menu.publish_options'));
-		// setIcon(iconEl, 'globe');
-		//
-		// // Add click handler to show publish menu
-		// iconEl.addEventListener('click', (e) => {
-		// 	e.preventDefault();
-		//
-		// 	const file = view.file;
-		// 	if (!file) {
-		// 		console.warn("[Friday] No file found in view");
-		// 		return;
-		// 	}
-		//
-		// 	// Create a menu — single Publish to MDFriday entry
-		// 	const menu = new Menu();
-		// 	this.addPublishMenuItems(menu, file);
-		// 	menu.showAtMouseEvent(e);
-		// });
-		//
-		// // Insert at the beginning of view-actions (left side)
-		// viewActionsEl.insertBefore(iconEl, viewActionsEl.firstChild);
-	}
-
-	/**
-	 * Cloudflare-only publish: open panel and trigger auto-publish.
-	 */
-	/**
 	 * Right-click "Publish to MDFriday": open panel, apply defaults, publish immediately.
 	 * Note → faithful; folder → themed + default theme. Ignores saved path config.
 	 */
@@ -1715,41 +1683,26 @@ export default class FridayPlugin extends Plugin {
 
 	// ==================== View Management Methods ====================
 	// These methods manage the Friday Service view lifecycle and ensure only one instance exists
-	
-	/**
-	 * Initialize the Friday Service view on plugin load
-	 * Called automatically during desktop features initialization
-	 * Only creates the view once per plugin load session
-	 */
-	initLeaf(): void {
-		// Only initialize once per plugin load
-		if (this.viewInitialized) {
-			return;
-		}
-		
-		void this.activateView();
-		this.viewInitialized = true;
-	}
 
 	/**
 	 * Unified method to activate/reveal Friday Service view
 	 * This should be used by all features that need to show the panel
-	 * 
+	 *
 	 * Behavior:
 	 * - If view exists: reveals the first instance
 	 * - If no view exists: creates a new one in the right sidebar
-	 * 
+	 *
 	 * @returns Promise that resolves when view is activated
 	 */
 	async activateView(): Promise<void> {
 		const leaves = this.app.workspace.getLeavesOfType(FRIDAY_SERVER_VIEW_TYPE);
-		
+
 		// If view exists, reveal the first one
 		if (leaves.length > 0) {
 			await this.app.workspace.revealLeaf(leaves[0]);
 			return;
 		}
-		
+
 		// Create new view if none exists
 		const leaf = this.app.workspace.getRightLeaf(false);
 		if (leaf) {
@@ -1779,7 +1732,6 @@ export default class FridayPlugin extends Plugin {
 
 	onunload() {
 		// Do not detach leaves — Obsidian restores leaf location; detaching resets it.
-		this.viewInitialized = false;
 	}
 
 	/**

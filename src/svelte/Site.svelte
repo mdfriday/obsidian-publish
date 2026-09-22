@@ -30,6 +30,12 @@
 		selectionVaultPath,
 	} from "../services/path-config";
 	import { normalizeVaultPath, pathsEqual } from "../services/project-path";
+	import {
+		createZipFromDirectory,
+		resolveExportPublicDir,
+		showZipSaveDialog,
+		writeZipFile,
+	} from "../utils/export-site";
 
 	// Receive props
 	export let app: App;
@@ -152,6 +158,7 @@
 	let previewWasStopped = false;
 	let hasPreview = false;
 	let absPreviewDir = '';
+	let isExporting = false;
 
 	// Publish related state
 	let isPublishing = false;
@@ -963,6 +970,7 @@
 		window.addEventListener('focus', onFocusMaybeRefreshClaim);
 
 		// Keep sidebar selection in sync with the active markdown note (soft follow).
+		// Never pops the sidebar — openOrFollowSelection uses reveal:false for createIfMissing:false.
 		const syncActiveNote = (file: TFile | null) => {
 			if (!file || file.extension !== 'md') return;
 			if (skipPathHydrate || isPublishing || isPreviewBuilding || plugin.isProjectInitializing) {
@@ -971,7 +979,7 @@
 			if (!plugin.isViewOpen?.()) return;
 			const currentPath = selectionVaultPath(currentContents);
 			if (currentPath === file.path) return;
-			void plugin.openOrFollowSelection(null, file, { createIfMissing: false });
+			void plugin.openOrFollowSelection(null, file, { createIfMissing: false, reveal: false });
 		};
 
 		plugin.registerEvent(
@@ -1872,6 +1880,34 @@
 		}
 	}
 
+	async function exportSite() {
+		if (!hasPreview || !absPreviewDir) {
+			new Notice(t('messages.please_generate_preview_first'), 3000);
+			return;
+		}
+
+		isExporting = true;
+		try {
+			const publicDir = await resolveExportPublicDir(absPreviewDir);
+			const zipContent = await createZipFromDirectory(publicDir);
+			const defaultName = `${projectName || plugin.currentProjectName || 'mdfriday-site'}.zip`;
+			const { canceled, filePath } = await showZipSaveDialog({
+				title: t('ui.export_site_dialog_title'),
+				defaultPath: defaultName,
+			});
+
+			if (!canceled && filePath) {
+				await writeZipFile(filePath, zipContent);
+				new Notice(t('messages.site_exported_successfully', { path: filePath }), 3000);
+			}
+		} catch (error: any) {
+			console.error('Export failed:', error);
+			new Notice(t('messages.export_failed', { error: error?.message || String(error) }), 5000);
+		} finally {
+			isExporting = false;
+		}
+	}
+
 	function dismissPanelResult() {
 		lastCompletedAction = null;
 	}
@@ -2227,6 +2263,8 @@
 	onPublish={startPublish}
 	onPreview={startPreview}
 	onStopPreview={stopPreview}
+	onExportSite={exportSite}
+	{isExporting}
 	onOpenUrl={openPublishUrl}
 	onCopyUrl={copyPublishUrl}
 	onRevokeShare={revokeShare}

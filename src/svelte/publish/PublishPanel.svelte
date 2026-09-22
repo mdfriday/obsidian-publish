@@ -63,6 +63,8 @@
 	export let onPublish: () => void;
 	export let onPreview: () => void;
 	export let onStopPreview: () => void;
+	export let onExportSite: (() => void | Promise<void>) | undefined = undefined;
+	export let isExporting: boolean = false;
 	export let onOpenUrl: () => void;
 	export let onCopyUrl: () => void;
 	export let onRevokeShare: () => void;
@@ -1035,6 +1037,16 @@
 						<p class="result-helper">{t('ui.result_preview_helper')}</p>
 					{/if}
 					<div class="result-secondary-wrap">
+						{#if resultKind === 'preview' && onExportSite}
+							<button
+								type="button"
+								class="btn btn-secondary btn-full"
+								disabled={isExporting}
+								on:click={() => onExportSite?.()}
+							>
+								{isExporting ? t('ui.exporting') : t('ui.export_site')}
+							</button>
+						{/if}
 						{#if resultKind === 'publish' && publishUrl}
 							<button type="button" class="btn-danger-soft" on:click={onRevokeShare}>{t('ui.revoke_share')}</button>
 						{:else if resultKind === 'preview'}
