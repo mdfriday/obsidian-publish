@@ -1235,7 +1235,10 @@
 	}
 
 	async function chooseBrandImage(which: 'logo' | 'favicon') {
-		const picked = await pickVaultImage(plugin.app, t('ui.brand_pick_placeholder'));
+		const picked = await pickVaultImage(plugin.app, {
+			title: which === 'logo' ? t('ui.site_logo') : t('ui.site_favicon'),
+			empty: t('ui.brand_pick_empty'),
+		});
 		if (!picked) return;
 		if (!userBrandPath(picked)) {
 			new Notice(t('ui.brand_reserved_name'));

@@ -3,6 +3,7 @@
 	import type { PublishMode, SelectionKind } from '../../types/publish-config';
 	import type { CatalogEntry } from '../../theme/types';
 	import { TFile, TFolder } from 'obsidian';
+	import { vaultImageSrc } from '../../branding/pick-vault-image';
 	import DomainSection from '../DomainSection.svelte';
 	import HistorySection from '../HistorySection.svelte';
 	import { filterThemesForSelection } from '../../utils/theme';
@@ -68,6 +69,9 @@
 	export let onPickFavicon: () => void;
 	export let onClearLogo: () => void;
 	export let onClearFavicon: () => void;
+
+	$: logoPreview = siteLogo ? vaultImageSrc(plugin.app, siteLogo) : '';
+	$: faviconPreview = siteFavicon ? vaultImageSrc(plugin.app, siteFavicon) : '';
 	export let onPublish: () => void;
 	export let onPreview: () => void;
 	export let onStopPreview: () => void;
@@ -918,17 +922,23 @@
 
 							<div class="field-group">
 								<div class="field-label">{t('ui.site_logo')}</div>
-								<div class="brand-row">
-									<input
-										class="field-input"
-										type="text"
-										readonly
-										placeholder={t('ui.brand_theme_default')}
-										value={siteLogo}
-									/>
-									<button type="button" class="btn btn-ghost" on:click={onPickLogo}>{t('ui.brand_choose')}</button>
+								<div class="brand-picker">
+									<button
+										type="button"
+										class="brand-frame"
+										class:is-empty={!siteLogo}
+										aria-label={t('ui.site_logo')}
+										on:click={onPickLogo}
+									>
+										{#if logoPreview}
+											<img src={logoPreview} alt="" />
+										{:else}
+											<span class="brand-placeholder" aria-hidden="true"></span>
+										{/if}
+									</button>
 									{#if siteLogo}
-										<button type="button" class="btn btn-ghost" on:click={onClearLogo}>{t('ui.brand_clear')}</button>
+										<div class="brand-path">{siteLogo}</div>
+										<button type="button" class="brand-clear" on:click={onClearLogo}>{t('ui.brand_clear')}</button>
 									{/if}
 								</div>
 								<p class="helper">{t('ui.brand_helper')}</p>
@@ -936,17 +946,23 @@
 
 							<div class="field-group">
 								<div class="field-label">{t('ui.site_favicon')}</div>
-								<div class="brand-row">
-									<input
-										class="field-input"
-										type="text"
-										readonly
-										placeholder={t('ui.brand_theme_default')}
-										value={siteFavicon}
-									/>
-									<button type="button" class="btn btn-ghost" on:click={onPickFavicon}>{t('ui.brand_choose')}</button>
+								<div class="brand-picker">
+									<button
+										type="button"
+										class="brand-frame"
+										class:is-empty={!siteFavicon}
+										aria-label={t('ui.site_favicon')}
+										on:click={onPickFavicon}
+									>
+										{#if faviconPreview}
+											<img src={faviconPreview} alt="" />
+										{:else}
+											<span class="brand-placeholder" aria-hidden="true"></span>
+										{/if}
+									</button>
 									{#if siteFavicon}
-										<button type="button" class="btn btn-ghost" on:click={onClearFavicon}>{t('ui.brand_clear')}</button>
+										<div class="brand-path">{siteFavicon}</div>
+										<button type="button" class="brand-clear" on:click={onClearFavicon}>{t('ui.brand_clear')}</button>
 									{/if}
 								</div>
 							</div>

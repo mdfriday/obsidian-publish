@@ -85,6 +85,7 @@ export const zhCn = {
 		brand_clear: "清除",
 		brand_helper: "路径相对库根目录，构建时按相同目录拷贝到 static/。",
 		brand_pick_placeholder: "搜索库中的图片",
+		brand_pick_empty: "库里没有图片",
 		brand_reserved_name: "请把图片放在文件夹里。库根目录的 favicon.svg 是主题默认图标。",
 		access_password: "访问密码",
 		password_helper: "访客需输入密码才能查看",

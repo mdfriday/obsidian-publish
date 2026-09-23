@@ -1,4 +1,4 @@
-import { FuzzySuggestModal, TFile, type App, type FuzzyMatch } from 'obsidian';
+import { Modal, TFile, type App } from 'obsidian';
 
 const IMAGE_EXT = new Set([
 	'png',
@@ -11,45 +11,77 @@ const IMAGE_EXT = new Set([
 	'avif',
 ]);
 
-export function pickVaultImage(app: App, placeholder: string): Promise<string | null> {
+export function vaultImageSrc(app: App, vaultPath: string): string {
+	const file = app.vault.getAbstractFileByPath(vaultPath);
+	if (!(file instanceof TFile)) return '';
+	if (!IMAGE_EXT.has(file.extension.toLowerCase())) return '';
+	return app.vault.getResourcePath(file);
+}
+
+function listVaultImages(app: App): TFile[] {
+	return app.vault
+		.getFiles()
+		.filter((file) => IMAGE_EXT.has(file.extension.toLowerCase()))
+		.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+export function pickVaultImage(
+	app: App,
+	options: { title: string; empty: string },
+): Promise<string | null> {
 	return new Promise((resolve) => {
-		let settled = false;
-		const finish = (vaultPath: string | null) => {
-			if (settled) return;
-			settled = true;
-			resolve(vaultPath);
-		};
-
-		const modal = new (class extends FuzzySuggestModal<TFile> {
-			chosen: string | null = null;
-
-			getItems(): TFile[] {
-				return app.vault
-					.getFiles()
-					.filter((file) => IMAGE_EXT.has(file.extension.toLowerCase()));
-			}
-
-			getItemText(file: TFile): string {
-				return file.path;
-			}
-
-			onChooseItem(file: TFile): void {
-				this.chosen = file.path;
-			}
-
-			selectSuggestion(value: FuzzyMatch<TFile>, evt: MouseEvent | KeyboardEvent): void {
-				// SuggestModal.close() runs before onChooseItem, so record the file first.
-				this.chosen = value.item?.path ?? null;
-				super.selectSuggestion(value, evt);
-			}
-
-			onClose(): void {
-				super.onClose();
-				finish(this.chosen);
-			}
-		})(app);
-
-		modal.setPlaceholder(placeholder);
+		const modal = new BrandImageModal(app, options, resolve);
 		modal.open();
 	});
+}
+
+class BrandImageModal extends Modal {
+	private settled = false;
+
+	constructor(
+		app: App,
+		private options: { title: string; empty: string },
+		private done: (vaultPath: string | null) => void,
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		const { contentEl, modalEl } = this;
+		modalEl.addClass('brand-pick-modal');
+		contentEl.empty();
+		contentEl.addClass('brand-pick');
+		contentEl.createEl('h3', { text: this.options.title, cls: 'brand-pick-title' });
+
+		const files = listVaultImages(this.app);
+		if (!files.length) {
+			contentEl.createDiv({ cls: 'brand-pick-empty', text: this.options.empty });
+			return;
+		}
+
+		const list = contentEl.createDiv({ cls: 'brand-pick-list' });
+		for (const file of files) {
+			const row = list.createEl('button', { cls: 'brand-pick-row' });
+			row.type = 'button';
+			const thumb = row.createEl('img', { cls: 'brand-pick-thumb' });
+			thumb.alt = '';
+			thumb.src = this.app.vault.getResourcePath(file);
+			row.createDiv({ cls: 'brand-pick-path', text: file.path });
+			row.addEventListener('click', () => {
+				this.finish(file.path);
+				this.close();
+			});
+		}
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+		this.finish(null);
+	}
+
+	private finish(vaultPath: string | null): void {
+		if (this.settled) return;
+		this.settled = true;
+		this.done(vaultPath);
+	}
 }

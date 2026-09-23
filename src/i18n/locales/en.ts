@@ -86,6 +86,7 @@ export const en = {
 		brand_clear: "Clear",
 		brand_helper: "Path is relative to the vault root and copied to static/ with the same folders.",
 		brand_pick_placeholder: "Search images in the vault",
+		brand_pick_empty: "No images in the vault",
 		brand_reserved_name: "Put the image in a folder. favicon.svg at the vault root is the theme default.",
 		access_password: "Access password",
 		password_helper: "Visitors need a password to view",
