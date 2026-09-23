@@ -17,6 +17,8 @@
 	import type { CatalogEntry } from "../theme/types";
 	import type { ProjectState, ProgressUpdate, PublishProgressUpdate } from "../types/events";
 	import { buildThemeConfigPatch } from "../theme/theme-config";
+	import { brandPathForUi, userBrandPath } from "../branding/brand-path";
+	import { pickVaultImage } from "../branding/pick-vault-image";
 	import { resolvePublicBaseUrl, resolveSiteBaseUrl } from "../cloudflare-env";
 	import { DEFAULT_THEME_SLUGS, filterThemesForSelection } from "../utils/theme";
 	import {
@@ -30,6 +32,7 @@
 		selectionVaultPath,
 	} from "../services/path-config";
 	import { normalizeVaultPath, pathsEqual } from "../services/project-path";
+	import { allowFollow } from "../selection/follow-policy";
 	import {
 		createZipFromDirectory,
 		resolveExportPublicDir,
@@ -140,6 +143,8 @@
 	let googleAnalyticsId = '';
 	let disqusShortname = '';
 	let sitePassword = '';
+	let siteLogo = '';
+	let siteFavicon = '';
 	
 	// UI state
 	let autoPublishEnabled = false;
@@ -258,6 +263,15 @@
 	 * Save single config value to Foundry
 	 * Uses event system to notify Main.ts
 	 */
+	const PARAM_CONFIG_KEYS = new Set([
+		'params.disqusShortname',
+		'params.password',
+		'params.autoPublish',
+		'params.lastPublishUrl',
+		'params.logo',
+		'params.favicon',
+	]);
+
 	async function saveFoundryConfig(key: string, value: any) {
 		if (!plugin.currentProjectName) {
 			return;
@@ -288,21 +302,13 @@
 				actualValue = {
 					googleAnalytics: { id: value }
 				};
-			} else if (key === 'params.disqusShortname' || key === 'params.password' || key === 'params.autoPublish' || key === 'params.lastPublishUrl') {
-				// For params, we need to merge with existing params
+			} else if (PARAM_CONFIG_KEYS.has(key)) {
 				const existingConfig = await plugin.getFoundryProjectConfigMap(plugin.currentProjectName);
-				const params = existingConfig['params'] || {};
-				
-				if (key === 'params.disqusShortname') {
-					params.disqusShortname = value;
-				} else if (key === 'params.password') {
-					params.password = value;
-				} else if (key === 'params.autoPublish') {
-					params.autoPublish = value;
-				} else if (key === 'params.lastPublishUrl') {
-					params.lastPublishUrl = value;
-				}
-				
+				const prev = existingConfig['params'];
+				const params = {
+					...(prev && typeof prev === 'object' ? prev as Record<string, unknown> : {}),
+				};
+				params[key.slice('params.'.length)] = value;
 				actualKey = 'params';
 				actualValue = params;
 			}
@@ -448,6 +454,8 @@
 		if (state.config.params?.password) {
 			sitePassword = state.config.params.password;
 		}
+		siteLogo = brandPathForUi(state.config.params?.logo);
+		siteFavicon = brandPathForUi(state.config.params?.favicon);
 		
 		// Load auto-publish setting
 		if (state.config.params?.autoPublish !== undefined) {
@@ -523,6 +531,8 @@
 		showAuthTip = false;
 
 		sitePassword = '';
+		siteLogo = '';
+		siteFavicon = '';
 		autoPublishEnabled = false;
 		googleAnalyticsId = '';
 		disqusShortname = '';
@@ -969,8 +979,12 @@
 
 		window.addEventListener('focus', onFocusMaybeRefreshClaim);
 
-		// Keep sidebar selection in sync with the active markdown note (soft follow).
-		// Never pops the sidebar — openOrFollowSelection uses reveal:false for createIfMissing:false.
+		// Workspace navigation may follow. Focusing this panel must not replace an explicit target.
+		const currentPathOnMount = selectionVaultPath(currentContents);
+		if (currentPathOnMount && plugin.selectionOrigin == null) {
+			plugin.selectionOrigin = 'explicit';
+		}
+
 		const syncActiveNote = (file: TFile | null) => {
 			if (!file || file.extension !== 'md') return;
 			if (skipPathHydrate || isPublishing || isPreviewBuilding || plugin.isProjectInitializing) {
@@ -979,7 +993,17 @@
 			if (!plugin.isViewOpen?.()) return;
 			const currentPath = selectionVaultPath(currentContents);
 			if (currentPath === file.path) return;
-			void plugin.openOrFollowSelection(null, file, { createIfMissing: false, reveal: false });
+			if (!allowFollow(plugin.selectionOrigin, {
+				type: 'active-file-changed',
+				hasTarget: !!currentPath,
+			})) {
+				return;
+			}
+			void plugin.openOrFollowSelection(null, file, {
+				createIfMissing: false,
+				reveal: false,
+				origin: 'follow',
+			});
 		};
 
 		plugin.registerEvent(
@@ -1183,6 +1207,49 @@
 	function handlePasswordChange(value: string) {
 		sitePassword = value;
 		schedulePersistPathConfig();
+	}
+
+	let brandSaveTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	async function persistSiteFields() {
+		if (brandSaveTimeout) {
+			clearTimeout(brandSaveTimeout);
+			brandSaveTimeout = null;
+		}
+		await saveFoundryConfig('title', siteName.trim());
+		await saveFoundryConfig('params.password', sitePassword.trim() || '');
+		await saveFoundryConfig('params.logo', siteLogo.trim());
+		await saveFoundryConfig('params.favicon', siteFavicon.trim());
+	}
+
+	function scheduleBrandSave() {
+		if (brandSaveTimeout) clearTimeout(brandSaveTimeout);
+		brandSaveTimeout = setTimeout(() => {
+			void persistSiteFields();
+		}, 300);
+	}
+
+	function handleTitleChange(value: string) {
+		siteName = value;
+		scheduleBrandSave();
+	}
+
+	async function chooseBrandImage(which: 'logo' | 'favicon') {
+		const picked = await pickVaultImage(plugin.app, t('ui.brand_pick_placeholder'));
+		if (!picked) return;
+		if (!userBrandPath(picked)) {
+			new Notice(t('ui.brand_reserved_name'));
+			return;
+		}
+		if (which === 'logo') siteLogo = picked;
+		else siteFavicon = picked;
+		await persistSiteFields();
+	}
+
+	async function clearBrandImage(which: 'logo' | 'favicon') {
+		if (which === 'logo') siteLogo = '';
+		else siteFavicon = '';
+		await persistSiteFields();
 	}
 
 	function setPublishMode(mode: PublishMode) {
@@ -1700,6 +1767,7 @@
 					throw new Error('Project path unavailable');
 				}
 				buildProgress = 30;
+				await persistSiteFields();
 				await buildFaithfulToProject(plugin, {
 					file: firstContent.file!,
 					publicDir,
@@ -1730,8 +1798,8 @@
 				return;
 			}
 
-			// Persist access password before themed build (same as publish).
-			await saveFoundryConfig('params.password', sitePassword.trim() || '');
+			// Persist title, brand images, and access password before the build.
+			await persistSiteFields();
 
 			// Themed: Foundry default SSG serve (no custom Obsidian renderer)
 			if (plugin.handleSiteEvent) {
@@ -1796,7 +1864,7 @@
 			const publishConfig = { method: 'cloudflare' as const, config: undefined };
 			resetPublishState();
 
-			await saveFoundryConfig('params.password', sitePassword.trim() || '');
+			await persistSiteFields();
 
 			if (plugin.handleSiteEvent) {
 				await plugin.handleSiteEvent('previewRequested', {
@@ -1958,11 +2026,7 @@
 				publishProgress = 40;
 			}
 
-			if (sitePassword) {
-				await saveFoundryConfig('params.password', sitePassword);
-			} else {
-				await saveFoundryConfig('params.password', '');
-			}
+			await persistSiteFields();
 
 			if (plugin.handleSiteEvent) {
 				await plugin.handleSiteEvent('buildAndPublishRequested', {
@@ -2234,6 +2298,9 @@
 	{selectedThemeSlug}
 	{themesLoading}
 	{sitePassword}
+	{siteName}
+	{siteLogo}
+	{siteFavicon}
 	{showAuthTip}
 	{authPrepareStep}
 	{isPublishing}
@@ -2260,6 +2327,11 @@
 	onSelectTheme={applyThemeBySlug}
 	onOpenThemesCatalog={openThemesCatalog}
 	onPasswordChange={handlePasswordChange}
+	onTitleChange={handleTitleChange}
+	onPickLogo={() => chooseBrandImage('logo')}
+	onPickFavicon={() => chooseBrandImage('favicon')}
+	onClearLogo={() => clearBrandImage('logo')}
+	onClearFavicon={() => clearBrandImage('favicon')}
 	onPublish={startPublish}
 	onPreview={startPreview}
 	onStopPreview={stopPreview}

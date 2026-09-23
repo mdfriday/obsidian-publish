@@ -25,6 +25,9 @@
 	export let themesLoading: boolean;
 
 	export let sitePassword: string;
+	export let siteName: string;
+	export let siteLogo: string;
+	export let siteFavicon: string;
 
 	export let showAuthTip: boolean;
 	export let authPrepareStep: 'idle' | 'prepare' | 'waiting' = 'idle';
@@ -60,6 +63,11 @@
 	export let onSelectTheme: (slug: string) => void;
 	export let onOpenThemesCatalog: () => void;
 	export let onPasswordChange: (value: string) => void;
+	export let onTitleChange: (value: string) => void;
+	export let onPickLogo: () => void;
+	export let onPickFavicon: () => void;
+	export let onClearLogo: () => void;
+	export let onClearFavicon: () => void;
 	export let onPublish: () => void;
 	export let onPreview: () => void;
 	export let onStopPreview: () => void;
@@ -351,6 +359,10 @@
 
 	function onPwdInput(e: Event) {
 		onPasswordChange((e.currentTarget as HTMLInputElement).value);
+	}
+
+	function onTitleInput(e: Event) {
+		onTitleChange((e.currentTarget as HTMLInputElement).value);
 	}
 
 	function demoUrl(entry: CatalogEntry): string {
@@ -893,6 +905,52 @@
 					</div>
 					{#if advancedOpen}
 						<div class="advanced-body">
+							<div class="field-group">
+								<div class="field-label">{t('ui.site_title')}</div>
+								<input
+									class="field-input"
+									type="text"
+									placeholder={t('ui.site_title_placeholder')}
+									value={siteName}
+									on:input={onTitleInput}
+								/>
+							</div>
+
+							<div class="field-group">
+								<div class="field-label">{t('ui.site_logo')}</div>
+								<div class="brand-row">
+									<input
+										class="field-input"
+										type="text"
+										readonly
+										placeholder={t('ui.brand_theme_default')}
+										value={siteLogo}
+									/>
+									<button type="button" class="btn btn-ghost" on:click={onPickLogo}>{t('ui.brand_choose')}</button>
+									{#if siteLogo}
+										<button type="button" class="btn btn-ghost" on:click={onClearLogo}>{t('ui.brand_clear')}</button>
+									{/if}
+								</div>
+								<p class="helper">{t('ui.brand_helper')}</p>
+							</div>
+
+							<div class="field-group">
+								<div class="field-label">{t('ui.site_favicon')}</div>
+								<div class="brand-row">
+									<input
+										class="field-input"
+										type="text"
+										readonly
+										placeholder={t('ui.brand_theme_default')}
+										value={siteFavicon}
+									/>
+									<button type="button" class="btn btn-ghost" on:click={onPickFavicon}>{t('ui.brand_choose')}</button>
+									{#if siteFavicon}
+										<button type="button" class="btn btn-ghost" on:click={onClearFavicon}>{t('ui.brand_clear')}</button>
+									{/if}
+								</div>
+							</div>
+
 							<div class="field-group">
 								<div class="toggle-row">
 									<span class="field-label" style="margin:0;">{t('ui.access_password')}</span>

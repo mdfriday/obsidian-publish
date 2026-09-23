@@ -8,18 +8,22 @@ export const DEFAULT_THEME_SLUGS = {
 	QUARTZ: 'quartz',
 } as const;
 
-/** Sidebar theme list: notes family for single note; quartz only for folder. */
+/** Folder publish lists wiki themes (kinds includes wiki). Quartz stays included if kinds are missing. */
+function isWikiTheme(theme: CatalogEntry): boolean {
+	if ((theme.kinds ?? []).some((kind) => kind.toLowerCase() === 'wiki')) return true;
+	const family = (theme.family || '').toLowerCase();
+	const slug = (theme.slug || '').toLowerCase();
+	return family === 'quartz' || slug === 'quartz';
+}
+
+/** Sidebar theme list: notes family for a single note; wiki themes for a folder. */
 export function filterThemesForSelection(
 	themes: CatalogEntry[],
 	kind: 'note' | 'folder',
 ): CatalogEntry[] {
 	const withPack = themes.filter((t) => !!t.packUrl);
 	if (kind === 'folder') {
-		return withPack.filter((t) => {
-			const family = (t.family || '').toLowerCase();
-			const slug = (t.slug || '').toLowerCase();
-			return family === 'quartz' || slug === 'quartz' || slug.startsWith('quartz');
-		});
+		return withPack.filter(isWikiTheme);
 	}
 	return withPack.filter((t) => (t.family || '').toLowerCase() === 'notes');
 }

@@ -1403,6 +1403,22 @@
   margin-bottom: 14px;
 }
 
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .brand-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .brand-row .field-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .brand-row .btn {
+  flex-shrink: 0;
+  padding: 8px 0;
+}
+
 .workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .toggle-row {
   display: flex;
   align-items: center;

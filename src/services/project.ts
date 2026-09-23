@@ -22,6 +22,8 @@ import {
 	stageNoteMediaToStatic,
 	writeRewrittenNoteContent,
 } from '../media/note-media';
+import { brandPathsFromParams } from '../branding/brand-path';
+import { stageBrandAssets } from '../branding/stage-brand-assets';
 
 /** Share mode baseURL per arch/03-build-contract.md */
 export function computeShareBaseUrl(publicBaseUrl: string, siteId: string): string {
@@ -348,7 +350,8 @@ export class ProjectServiceManager {
 			);
 		}
 
-		if (!entry?.userAssets?.length) {
+		const brandPaths = brandPathsFromParams(paramsObj);
+		if (!entry?.userAssets?.length && brandPaths.length === 0) {
 			return;
 		}
 
@@ -357,12 +360,21 @@ export class ProjectServiceManager {
 			projectName,
 		);
 		const staticLink = infoResult.success ? infoResult.data?.staticLink : undefined;
+		const projectPath = infoResult.success ? infoResult.data?.path : undefined;
 
 		let userStatic: Record<string, true> = {};
-		if (staticLink?.sourcePath) {
+		if (staticLink?.sourcePath && entry?.userAssets?.length) {
 			const rel = this.plugin.getVaultRelativePath(staticLink.sourcePath);
 			const files = await listVaultStaticFiles(this.plugin.app, rel);
 			userStatic = buildUserStaticMap(files, entry.userAssets);
+		}
+		if (projectPath) {
+			const staticDir = path.join(projectPath, 'static');
+			for (const rel of brandPaths) {
+				if (fs.existsSync(path.join(staticDir, ...rel.split('/')))) {
+					userStatic[rel] = true;
+				}
+			}
 		}
 
 		const params = {
@@ -921,13 +933,37 @@ export class ProjectServiceManager {
 	/**
 	 * 构建项目
 	 */
+	/**
+	 * Copy vault brand images into project static/ and record them in userStatic
+	 * so theme resolve-asset serves the user file instead of the CDN default.
+	 */
+	async stageProjectBrandAssets(projectName: string): Promise<void> {
+		const info = await this.plugin.foundryProjectService.getProjectInfo(
+			this.plugin.absWorkspacePath,
+			projectName,
+		);
+		if (!info.success || !info.data?.path) return;
+		const config = await this.getConfig(projectName);
+		const params =
+			config.params && typeof config.params === 'object'
+				? (config.params as Record<string, unknown>)
+				: undefined;
+		const staticDir = path.join(info.data.path, 'static');
+		await stageBrandAssets(this.plugin, staticDir, brandPathsFromParams(params));
+	}
+
+	async prepareProjectAssets(projectName: string): Promise<void> {
+		await this.prepareThemedSingleNoteMedia(projectName);
+		await this.stageProjectBrandAssets(projectName);
+		await this.syncUserStaticConfig(projectName);
+	}
+
 	async build(
 		projectName: string,
 		onProgress?: (progress: ProgressUpdate) => void
 	): Promise<BuildResult> {
 		try {
-			await this.prepareThemedSingleNoteMedia(projectName);
-			await this.syncUserStaticConfig(projectName);
+			await this.prepareProjectAssets(projectName);
 			const result = await this.plugin.foundryBuildService.buildProject({
 				workspacePath: this.plugin.absWorkspacePath,
 				projectNameOrPath: projectName,
@@ -982,7 +1018,7 @@ export class ProjectServiceManager {
 			}
 		}
 
-		await this.prepareThemedSingleNoteMedia(projectName);
+		await this.prepareProjectAssets(projectName);
 
 		const result = await this.plugin.foundryServeService.startServer(
 			{

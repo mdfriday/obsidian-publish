@@ -28,6 +28,7 @@ import {
 	projectPrimaryVaultPath,
 	remapPathAfterRename,
 } from './services/project-path';
+import {allowFollow, type SelectionOrigin} from './selection/follow-policy';
 import type {ProgressUpdate, ProjectState, PublishProgressUpdate, SiteEventData, SiteEventType} from './types/events';
 import {normalizePublishMethod} from './types/publish';
 import {resolveDefaultTheme, shouldUseInternalRenderer} from './utils/theme';
@@ -200,6 +201,12 @@ export default class FridayPlugin extends Plugin {
 	 */
 	selectionEpoch: number = 0
 	/**
+	 * Why the current target is showing.
+	 * explicit targets stay put when the editor or the panel itself takes focus.
+	 * follow targets track notes the user opens. Null means the panel has no committed target.
+	 */
+	selectionOrigin: SelectionOrigin | null = null
+	/**
 	 * Bumped in applyCloudflareEnv so Svelte UIs re-read Account/API URLs
 	 * (settings field mutation alone does not trigger `$:`).
 	 */
@@ -353,8 +360,7 @@ export default class FridayPlugin extends Plugin {
 		// Do not auto-open the sidebar on startup — only on explicit user action
 		// (context menu, sidebar tab toggle, or commands that call activateView).
 
-		// When user focuses the Friday sidebar tab, sync panel to the active note
-		// without forcing the sidebar open (it is already being revealed by Obsidian).
+		// Focusing the publish panel is not a new target. Seed only when nothing is selected.
 		this.registerEvent(
 			this.app.workspace.on('active-leaf-change', (leaf) => {
 				if (leaf?.view?.getViewType() !== FRIDAY_SERVER_VIEW_TYPE) return;
@@ -670,17 +676,23 @@ export default class FridayPlugin extends Plugin {
 	}
 
 	/**
-	 * Soft-sync panel selection to the workspace active markdown file.
-	 * Never expands or reveals the sidebar — used when the user already opened the panel.
+	 * Panel focus may seed an empty publish target from the active note.
+	 * It never replaces a folder or note the user already chose.
 	 */
 	async syncPanelToActiveFile(): Promise<void> {
 		if (this.isProjectInitializing) return;
-		const file = this.app.workspace.getActiveFile();
-		if (!(file instanceof TFile) || file.extension !== 'md') return;
 		const contents = this.site?.getCurrentContents?.() ?? [];
 		const currentPath = contents[0]?.file?.path ?? contents[0]?.folder?.path ?? null;
-		if (currentPath === file.path) return;
-		await this.openOrFollowSelection(null, file, { createIfMissing: false, reveal: false });
+		if (!allowFollow(this.selectionOrigin, { type: 'panel-focused', hasTarget: !!currentPath })) {
+			return;
+		}
+		const file = this.app.workspace.getActiveFile();
+		if (!(file instanceof TFile) || file.extension !== 'md') return;
+		await this.openOrFollowSelection(null, file, {
+			createIfMissing: false,
+			reveal: false,
+			origin: 'follow',
+		});
 	}
 
 	/**
@@ -692,9 +704,8 @@ export default class FridayPlugin extends Plugin {
 	async openOrFollowSelection(
 		folder: TFolder | null,
 		file: TFile | null,
-		opts: { createIfMissing: boolean; reveal?: boolean },
+		opts: { createIfMissing: boolean; reveal?: boolean; origin?: SelectionOrigin | 'preserve' },
 	) {
-		const epoch = ++this.selectionEpoch;
 		const reveal = opts.reveal ?? opts.createIfMissing;
 
 		if (reveal) {
@@ -712,6 +723,12 @@ export default class FridayPlugin extends Plugin {
 			console.warn('Unable to determine vault path');
 			return;
 		}
+
+		const origin = opts.origin ?? 'explicit';
+		if (origin !== 'preserve') {
+			this.selectionOrigin = origin;
+		}
+		const epoch = ++this.selectionEpoch;
 
 		const existingByPath = await this.findLocalProjectByVaultPath(vaultPath);
 		if (epoch !== this.selectionEpoch) return;
@@ -802,7 +819,7 @@ export default class FridayPlugin extends Plugin {
 		const contents = this.site.getCurrentContents();
 		const first = contents[0];
 		if (!first) return false;
-		await this.openOrFollowSelection(first.folder, first.file, { createIfMissing: true });
+		await this.openOrFollowSelection(first.folder, first.file, { createIfMissing: true, origin: 'preserve' });
 		return !!this.currentProjectName;
 	}
 

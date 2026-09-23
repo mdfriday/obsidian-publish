@@ -4,11 +4,28 @@ import type {CatalogEntry, MdfridayThemeParams} from './types';
 const PRESERVED_PARAM_KEYS = new Set([
 	'branding',
 	'password',
+	'logo',
 	'favicon',
 	'disqusShortname',
 	'autoPublish',
 	'lastPublishUrl',
 	'mdfriday',
+]);
+
+/**
+ * Standard Base capability roots. Always replaced from the theme.
+ * Keep aligned with theme-pack CAP_ACTIVATION_DEFAULTS.
+ * Every other siteParams key is a customParam default: write only when absent.
+ */
+const THEME_CAPABILITY_PARAM_KEYS = new Set([
+	'search',
+	'explorer',
+	'graph',
+	'clipboard',
+	'breadcrumbs',
+	'readerMode',
+	'toc',
+	'llmCopy',
 ]);
 
 export function entryToMdfridayParams(
@@ -35,7 +52,8 @@ export function entryToModuleImport(entry: CatalogEntry): { path: string } {
 
 /**
  * Merge theme siteParams into existing config.params.
- * Drops previous theme capability / custom keys; keeps user preserved fields.
+ * Capability keys always follow the theme. customParams fill only when the project
+ * does not already have that key, so a user logo survives the next apply.
  */
 export function mergeThemeSiteParams(
 	existingParams: Record<string, unknown> | undefined,
@@ -57,11 +75,19 @@ export function mergeThemeSiteParams(
 	}
 
 	const siteParams = entry.siteParams ?? {};
-	return {
-		...preserved,
-		...siteParams,
-		mdfriday,
-	};
+	const params: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(siteParams)) {
+		if (THEME_CAPABILITY_PARAM_KEYS.has(key) || !(key in prev)) {
+			params[key] = value;
+		} else {
+			params[key] = prev[key];
+		}
+	}
+	for (const [key, value] of Object.entries(preserved)) {
+		if (!(key in params)) params[key] = value;
+	}
+	params.mdfriday = mdfriday;
+	return params;
 }
 
 export function buildThemeConfigPatch(
