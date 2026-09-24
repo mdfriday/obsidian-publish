@@ -456,6 +456,13 @@
 		}
 		siteLogo = brandPathForUi(state.config.params?.logo);
 		siteFavicon = brandPathForUi(state.config.params?.favicon);
+
+		// Migration (pre-navLinks UI): clear theme-seeded navLinks so sites match
+		// Advanced (no editor → empty). After Advanced can edit navLinks, remove this.
+		const existingNav = state.config.params?.navLinks;
+		if (Array.isArray(existingNav) && existingNav.length > 0) {
+			await saveFoundryConfig('params.navLinks', []);
+		}
 		
 		// Load auto-publish setting
 		if (state.config.params?.autoPublish !== undefined) {
