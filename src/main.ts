@@ -166,6 +166,8 @@ export function GetBaseUrl(_settings?: FridaySettings): string {
 
 export default class FridayPlugin extends Plugin {
 	settings: FridaySettings;
+	/** Settings tab — call update() when credential UI must refresh. */
+	settingTab: FridaySettingTab | null = null;
 	statusBar: HTMLElement
 
 	pluginDir: string
@@ -256,6 +258,7 @@ export default class FridayPlugin extends Plugin {
 					this.settings.mdfKeyKind = 'user';
 					await this.saveSettings();
 					this.foundryPublishService?.setKey?.(delivered, 'user');
+					this.refreshSettingsUi();
 				}
 				const mgr = this.projectServiceManager;
 				if (mgr) {
@@ -306,7 +309,8 @@ export default class FridayPlugin extends Plugin {
 		}
 
 		this.statusBar = this.addStatusBarItem();
-		this.addSettingTab(new FridaySettingTab(this.app, this));
+		this.settingTab = new FridaySettingTab(this.app, this);
+		this.addSettingTab(this.settingTab);
 	}
 
 	/**
@@ -1863,6 +1867,15 @@ export default class FridayPlugin extends Plugin {
 		this.turnstileWaiter = null;
 		resolve(token);
 		new Notice('Security check OK — continuing…', 3000);
+	}
+
+	/** Re-index / re-render Obsidian settings after mdfKey or related fields change. */
+	refreshSettingsUi(): void {
+		try {
+			this.settingTab?.update();
+		} catch (e) {
+			console.warn('[Friday] settings UI refresh failed', e);
+		}
 	}
 
 	async saveSettings() {

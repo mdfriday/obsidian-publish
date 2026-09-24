@@ -418,9 +418,9 @@ export class ProjectServiceManager {
 		return !!this.plugin.settings.mdfKey;
 	}
 
-	/** Staging/prod guest flow needs Turnstile; local skips it. */
+	/** Guest key no longer requires Turnstile (API rate-limits by IP). Keep helper for unused UI. */
 	needsTurnstileForGuest(): boolean {
-		return (this.plugin.settings.cloudflareResolvedEnv || 'local') !== 'local';
+		return false;
 	}
 
 	/**
@@ -443,7 +443,7 @@ export class ProjectServiceManager {
 	}
 
 	/**
-	 * Create guest MDF Key (Turnstile on staging/prod). Call after user confirms in-panel.
+	 * Create guest MDF Key (no Turnstile — API rate-limits by IP). Call after user confirms in-panel.
 	 */
 	async requestGuestKey(): Promise<string | null> {
 		const foundry = this.plugin.foundryPublishService;
@@ -451,28 +451,20 @@ export class ProjectServiceManager {
 
 		if (!foundry) return null;
 
-		let turnstileToken: string | undefined;
-		const resolved = this.plugin.settings.cloudflareResolvedEnv || 'local';
-		if (resolved !== 'local') {
-			try {
-				const token = await this.plugin.requestTurnstileToken();
-				if (!token) {
-					new Notice('Turnstile required but no challenge URL configured', 5000);
-					return null;
-				}
-				turnstileToken = token;
-			} catch (e) {
-				new Notice((e as Error).message || 'Turnstile failed', 5000);
-				return null;
-			}
-		}
-
-		const guest = await foundry.guest(
-			turnstileToken ? { turnstileToken } : undefined,
-		);
+		const guest = await foundry.guest();
 		const key = guest.key || (guest as { token?: string }).token;
 		if (!guest.success || !key) {
-			new Notice(guest.error || 'Could not create guest Key', 5000);
+			const err = guest.error || 'Could not create guest Key';
+			const is429 =
+				/(?:^|\D)429(?:\D|$)/i.test(err) ||
+				/rate.?limit/i.test(err) ||
+				/too many/i.test(err);
+			new Notice(
+				is429
+					? 'Too many guest key requests from this network. Please wait and try again.'
+					: err,
+				5000,
+			);
 			return null;
 		}
 
@@ -489,6 +481,7 @@ export class ProjectServiceManager {
 			this.plugin.settings.mdfQuotaStorageBytes ?? 5 * 1024 * 1024;
 		await this.plugin.saveSettings();
 		foundry.setKey(key, 'guest');
+		this.plugin.refreshSettingsUi();
 		void this.refreshCloudflareAccount();
 		return key;
 	}
@@ -638,19 +631,15 @@ export class ProjectServiceManager {
 					? max
 					: plan === 'guest'
 						? 1
-						: plan === 'free'
-							? 3
-							: null;
+						: null; // free/personal/pro: unlimited when quota unset
 		if (effectiveMax != null && used >= effectiveMax) {
 			return {
 				ok: false,
 				code: 'quota_exceeded',
 				error:
 					plan === 'guest'
-						? 'Guest allows only 1 site — limit reached. Sign up free to unlock 3 sites.'
-						: plan === 'free'
-							? 'Free allows 3 sites — limit reached. Upgrade to Personal for unlimited sites.'
-							: `Site limit reached (${used}/${effectiveMax}).`,
+						? 'Guest allows only 1 site — limit reached. Sign up free for unlimited sites and 50 MB permanent storage.'
+						: `Site limit reached (${used}/${effectiveMax}).`,
 			};
 		}
 		return { ok: true };

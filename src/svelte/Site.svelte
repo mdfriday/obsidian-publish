@@ -1059,9 +1059,8 @@
 		const mgr = plugin.projectServiceManager;
 		if (!mgr) return;
 		showAuthTip = false;
-		authPrepareStep = 'waiting';
-		const key = await mgr.requestGuestKey();
 		authPrepareStep = 'idle';
+		const key = await mgr.requestGuestKey();
 		if (key) {
 			await runPublish();
 		}
@@ -2111,22 +2110,19 @@
 			}
 		}
 
+		// Seamless guest: mint key in-panel with no Turnstile / verify UI, then publish.
 		if (!plugin.settings.mdfKey) {
-			if (!opts?.allowGuestBootstrap) {
+			const allowGuestBootstrap = opts?.allowGuestBootstrap !== false;
+			if (!allowGuestBootstrap) {
 				showAuthTip = true;
 				return;
 			}
 			const mgr = plugin.projectServiceManager;
-			if (mgr) {
-				if (mgr.needsTurnstileForGuest()) {
-					authPrepareStep = 'prepare';
-					return;
-				}
-				authPrepareStep = 'waiting';
-				const key = await mgr.requestGuestKey();
-				authPrepareStep = 'idle';
-				if (!key) return;
-			}
+			if (!mgr) return;
+			const key = await mgr.requestGuestKey();
+			if (!key) return;
+			quotaRevision += 1;
+			accountEpoch += 1;
 		}
 
 		showAuthTip = false;
@@ -2335,7 +2331,7 @@
 	onPickFavicon={() => chooseBrandImage('favicon')}
 	onClearLogo={() => clearBrandImage('logo')}
 	onClearFavicon={() => clearBrandImage('favicon')}
-	onPublish={startPublish}
+	onPublish={() => startPublish({ allowGuestBootstrap: true })}
 	onPreview={startPreview}
 	onStopPreview={stopPreview}
 	onExportSite={exportSite}

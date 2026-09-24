@@ -153,14 +153,11 @@
 					? 'result'
 					: 'idle') as 'idle' | 'verify' | 'building' | 'result' | 'softgate';
 	$: showActions = activeTab === 'publish' && panelView === 'idle';
-	$: publishPrimaryLabel =
-		isGuest && !hasKey
-			? t('ui.verify_and_publish')
-			: publishUrl
-				? t('ui.publish_again')
-				: selectionKind === 'folder'
-					? t('ui.publish_site')
-					: t('ui.publish');
+	$: publishPrimaryLabel = publishUrl
+		? t('ui.publish_again')
+		: selectionKind === 'folder'
+			? t('ui.publish_site')
+			: t('ui.publish');
 	$: actionsDisabled = !hasContent || building;
 	$: projectStatus = (publishRevoked
 		? 'revoked'
@@ -175,7 +172,7 @@
 	$: projectMax =
 		(quotaRevision,
 		plugin.settings.mdfQuotaMaxProjects ??
-			(planTier === 'guest' ? 1 : planTier === 'free' ? 3 : null));
+			(planTier === 'guest' ? 1 : null));
 	$: storageUsed = (quotaRevision, plugin.settings.mdfStorageBytes);
 	$: storageMax =
 		(quotaRevision,

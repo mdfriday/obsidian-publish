@@ -824,12 +824,13 @@
             <div class="pp-best">最适合：持续免费发布</div>
             <div class="pp-price"><span class="muted">免费 · 注册即可</span></div>
             <ul class="pp-benefits">
-              <li>注册后认领 Guest 站点，按月持续发布</li>
+              <li>注册后认领 Guest 站点，持续发布</li>
               <li>包含 Guest 全部能力</li>
-              <li>50 MB 存储</li>
+              <li>50 MB 永久存储</li>
+              <li>站点数量不限</li>
               <li>认领 Guest 站点并保留同一 URL</li>
               <li>在账号中管理站点与发布</li>
-              <li class="note">站点于每月 1 日清空</li>
+              <li class="note">保持活跃即可继续使用（长期未活动可能软归档）</li>
             </ul>
             <!-- product: https://mdfriday.com/account/ · proto may use localhost:8080/account/ -->
             <a class="pp-cta" data-cta="free" href="https://mdfriday.com/account/">免费注册</a>
@@ -845,8 +846,7 @@
             <ul class="pp-benefits">
               <li>包含 Free 全部能力</li>
               <li>1 GB 存储</li>
-              <li>永久保留站点</li>
-              <li>1 个自定义域名 · 自动 HTTPS</li>
+              <li>最多 3 个自定义域名 · 自动 HTTPS</li>
               <li>发布历史与回滚</li>
             </ul>
             <a class="pp-cta" data-cta="personal" href="https://mdfriday.com/account/">升级到 Personal</a>
@@ -1006,7 +1006,7 @@
         <div class="state-view" id="viewSoftgate">
           <div style="font-size:32px;margin-bottom:12px;">✦</div>
           <div class="state-title">认领到 Free 以继续</div>
-          <div class="state-desc">免费注册即可认领 Guest 站点、保留同一 URL，并获得 50 MB 存储。站点于每月 1 日清空。</div>
+          <div class="state-desc">免费注册即可认领 Guest 站点、保留同一 URL，并获得 50 MB 永久存储与不限站点数。保持活跃即可继续使用。</div>
           <div style="width:100%;margin-top:20px;display:flex;flex-direction:column;gap:8px;">
             <button class="btn btn-primary btn-full" id="btnRegister">免费注册</button>
             <button class="btn btn-secondary btn-full" id="btnSoftLater">稍后再说</button>
@@ -1439,7 +1439,7 @@
         ' · <button class="link" data-open-plan>查看计划</button>';
     } else if (state.plan === 'free') {
       el.style.display = '';
-      el.innerHTML = 'Free · 50 MB 存储 · 站点于<strong>每月 1 日</strong>清空 · 升级 Personal 可自定义域名、永久保留与发布历史 · ' +
+      el.innerHTML = 'Free · 50 MB 永久存储 · 保持活跃即可 · 升级 Personal 可自定义域名、更大存储与发布历史 · ' +
         '<button class="link" data-open-plan>查看计划</button>';
     } else {
       el.style.display = 'none';
