@@ -32,6 +32,11 @@ Many publishing solutions require:
 MDFriday Publish removes that complexity.
 Publish directly from Obsidian with a single click.
 
+## Network use & privacy
+
+- Publishing requires network access. The plugin talks to the MDFriday API (`api.mdfriday.com`) for guest/account sessions, projects, releases, custom domains and billing; uploads your built site to Cloudflare R2 using short-lived, per-release credentials; and loads the theme catalog and theme packs from `cdn.mdfriday.com`. The plugin itself sends no analytics or telemetry.
+- Requests to the MDFriday API include an `X-MDFriday-Client: obsidian-publish/<version>` header (plugin name and version only, no personal data); the MDFriday service records publishing, domain and billing actions server-side to operate and improve the service.
+
 ## Learn More
 
 - Website: https://mdfriday.com

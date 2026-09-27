@@ -12,7 +12,6 @@
 		selectionKindFromContents,
 	} from "../types/publish-config";
 	import * as path from "path";
-	import {GetBaseUrl} from "../main";
 	import {themeApiService} from "../theme/themeApiService";
 	import type { CatalogEntry } from "../theme/types";
 	import type { ProjectState, ProgressUpdate, PublishProgressUpdate } from "../types/events";
@@ -1819,12 +1818,6 @@
 				});
 			}
 
-			if (plugin.hugoverse) {
-				plugin.hugoverse.sendCounter('preview').catch(error => {
-					console.warn('Counter request failed (non-critical):', error);
-				});
-			}
-
 		} catch (error) {
 			console.error('Preview generation failed:', error);
 			new Notice(t('messages.preview_failed', { error: error.message }), 5000);
@@ -1880,12 +1873,6 @@
 					projectName: plugin.currentProjectName,
 					port: serverPort,
 					publishConfig,
-				});
-			}
-
-			if (plugin.hugoverse) {
-				plugin.hugoverse.sendCounter('preview').catch(error => {
-					console.warn('Counter request failed (non-critical):', error);
 				});
 			}
 		} catch (error) {

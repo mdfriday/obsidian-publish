@@ -14,6 +14,7 @@ import type {
 	IdentityHttpClient, 
 	IdentityHttpResponse,
 } from './foundry/types';
+import { withMdfridayClientHeader } from './mdfriday-client';
 
 /**
  * Electron / Obsidian requestUrl rejects forbidden headers with net::ERR_INVALID_ARGUMENT.
@@ -178,9 +179,11 @@ function nodeHttpRequest(
 }
 
 async function requestUrlOrNode(
-	param: RequestUrlParam,
+	rawParam: RequestUrlParam,
 	nodeBody?: Buffer | Uint8Array | ArrayBuffer,
 ): Promise<PublishHttpResponse> {
+	const headers = withMdfridayClientHeader(rawParam.url, rawParam.headers);
+	const param: RequestUrlParam = headers ? { ...rawParam, headers } : rawParam;
 	try {
 		const response = await requestUrl({ ...param, throw: false });
 		return adaptObsidianResponse(response);
@@ -206,14 +209,37 @@ export class ObsidianHttpClient implements PublishHttpClient {
    * POST JSON data
    */
   async postJSON(url: string, data: unknown, headers?: Record<string, string>): Promise<PublishHttpResponse> {
+    return this.sendJSON('POST', url, data, headers);
+  }
+
+  /**
+   * PATCH JSON data (e.g. PATCH /v1/projects/:id)
+   */
+  async patchJSON(url: string, data: unknown, headers?: Record<string, string>): Promise<PublishHttpResponse> {
+    return this.sendJSON('PATCH', url, data, headers);
+  }
+
+  /**
+   * PUT JSON data
+   */
+  async putJSON(url: string, data: unknown, headers?: Record<string, string>): Promise<PublishHttpResponse> {
+    return this.sendJSON('PUT', url, data, headers);
+  }
+
+  private async sendJSON(
+    method: 'POST' | 'PATCH' | 'PUT',
+    url: string,
+    data: unknown,
+    headers?: Record<string, string>,
+  ): Promise<PublishHttpResponse> {
     const response = await requestUrl({
       url,
-      method: 'POST',
-      headers: {
+      method,
+      headers: withMdfridayClientHeader(url, {
         'Content-Type': 'application/json',
         ...headers,
-      },
-      body: JSON.stringify(data),
+      }),
+      body: JSON.stringify(data ?? {}),
       throw: false,
     });
 
@@ -256,10 +282,10 @@ export class ObsidianHttpClient implements PublishHttpClient {
     const response = await requestUrl({
       url,
       method: 'POST',
-      headers: {
+      headers: withMdfridayClientHeader(url, {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         ...headers,
-      },
+      }),
       body: arrayBufferBody,
       throw: false,
     });
@@ -295,7 +321,7 @@ export class ObsidianHttpClient implements PublishHttpClient {
    * GET request
    */
   async get(url: string, headers?: Record<string, string>): Promise<PublishHttpResponse> {
-    const sanitized = sanitizeRequestHeaders(headers);
+    const sanitized = withMdfridayClientHeader(url, sanitizeRequestHeaders(headers));
     const request: RequestUrlParam = {
       url,
       method: 'GET',
@@ -505,10 +531,10 @@ export class ObsidianIdentityHttpClient implements IdentityHttpClient {
     const response = await requestUrl({
       url,
       method: 'POST',
-      headers: {
+      headers: withMdfridayClientHeader(url, {
         'Content-Type': 'application/json',
         ...headers,
-      },
+      }),
       body: JSON.stringify(data),
       throw: false,
     });
@@ -538,9 +564,9 @@ export class ObsidianIdentityHttpClient implements IdentityHttpClient {
     const response = await requestUrl({
       url,
       method: 'POST',
-      headers: {
+      headers: withMdfridayClientHeader(url, {
         'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      }),
       body: formBody,
     });
 
@@ -583,10 +609,10 @@ export class ObsidianIdentityHttpClient implements IdentityHttpClient {
     const response = await requestUrl({
       url,
       method: 'POST',
-      headers: {
+      headers: withMdfridayClientHeader(url, {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         ...headers,
-      },
+      }),
       body: arrayBufferBody,
     });
 
@@ -602,8 +628,9 @@ export class ObsidianIdentityHttpClient implements IdentityHttpClient {
       method: 'GET',
     };
     
-    if (headers) {
-      request.headers = headers;
+    const finalHeaders = withMdfridayClientHeader(url, headers);
+    if (finalHeaders) {
+      request.headers = finalHeaders;
     }
 
     const response = await requestUrl(request);

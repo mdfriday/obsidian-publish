@@ -41,9 +41,9 @@ import {
 	logLevelForCloudflareEnv,
 	resolveAccountBaseUrl,
 } from './cloudflare-env';
+import {registerMdfridayApiBaseUrl, setMdfridayClientVersion} from './mdfriday-client';
 
 // PC-only module types (dynamically imported)
-import type {Hugoverse} from "./hugoverse";
 import type {Site} from "./site";
 
 /** Factories not exported as classes — infer service instance types. */
@@ -153,16 +153,6 @@ const DEFAULT_SETTINGS: FridaySettings = {
 }
 
 export const FRIDAY_ICON = 'dice-5';
-export const API_URL_DEV = 'http://127.0.0.1:1314';
-export const API_URL_PRO = 'https://app.mdfriday.com';
-
-/** Get base URL for legacy MDFriday API requests (Cloudflare publish uses cloudflareApiBaseUrl). */
-export function GetBaseUrl(_settings?: FridaySettings): string {
-	if (process.env.NODE_ENV === 'development') {
-		return API_URL_DEV;
-	}
-	return API_URL_PRO;
-}
 
 export default class FridayPlugin extends Plugin {
 	settings: FridaySettings;
@@ -173,13 +163,11 @@ export default class FridayPlugin extends Plugin {
 	pluginDir: string
 	absWorkspacePath: string
 	vaultBasePath: string
-	apiUrl: string
 	
 	// Core services (always available)
 	i18n: I18nService
 	
 	// PC-only services (optional, only loaded on desktop)
-	hugoverse?: Hugoverse
 	site?: Site
 	workspaceService?: ObsidianWorkspaceService
 	// Foundry services
@@ -232,6 +220,8 @@ export default class FridayPlugin extends Plugin {
 
 	async onload() {
 		this.pluginDir = `${this.manifest.dir}`;
+		// X-MDFriday-Client: obsidian-publish/<version> on MDFriday API requests only
+		setMdfridayClientVersion(this.manifest.version);
 		await this.loadSettings();
 
 		// Obsidian official deep link:
@@ -317,14 +307,9 @@ export default class FridayPlugin extends Plugin {
 	 * Initialize core services (common for all platforms)
 	 */
 	private async initCore(): Promise<void> {
-		this.apiUrl = GetBaseUrl(this.settings);
-		
 		// Initialize i18n service first
 		this.i18n = new I18nService(this);
 		await this.i18n.init();
-
-		const { Hugoverse } = await import('./hugoverse');
-		this.hugoverse = new Hugoverse(this);
 		
 		// Note: License usage is fetched when user opens Settings page (not on startup)
 		// This improves plugin startup performance
@@ -1811,6 +1796,7 @@ export default class FridayPlugin extends Plugin {
 		this.settings.cloudflareEnv = resolved;
 		this.settings.cloudflareResolvedEnv = resolved;
 		this.settings.cloudflareApiBaseUrl = endpoints.apiBaseUrl;
+		registerMdfridayApiBaseUrl(endpoints.apiBaseUrl);
 		this.settings.cloudflarePublicBaseUrl = endpoints.publicBaseUrl;
 		this.settings.cloudflareAccountBaseUrl = endpoints.accountBaseUrl;
 		this.cloudflareEnvEpoch += 1;

@@ -33,6 +33,8 @@ export interface PublishHttpResponse {
 
 export interface PublishHttpClient {
   postJSON(url: string, data: unknown, headers?: Record<string, string>): Promise<PublishHttpResponse>;
+  patchJSON?(url: string, data: unknown, headers?: Record<string, string>): Promise<PublishHttpResponse>;
+  putJSON?(url: string, data: unknown, headers?: Record<string, string>): Promise<PublishHttpResponse>;
   postMultipart(url: string, formData: Record<string, unknown>, headers?: Record<string, string>): Promise<PublishHttpResponse>;
   putBinary(url: string, data: Buffer | Uint8Array, headers?: Record<string, string>): Promise<PublishHttpResponse>;
   get(url: string, headers?: Record<string, string>): Promise<PublishHttpResponse>;

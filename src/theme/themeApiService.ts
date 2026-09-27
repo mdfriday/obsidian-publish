@@ -15,6 +15,7 @@ import {
 } from './theme-entitlement';
 import type { CatalogEntry, ThemeSearchResult } from './types';
 import { requestUrl } from 'obsidian';
+import { withMdfridayClientHeader } from '../mdfriday-client';
 
 interface ApiCatalogEntry extends PublicCatalogEntry {
 	entitled?: boolean;
@@ -96,11 +97,11 @@ async function fetchApiPackMap(
 	const response = await requestUrl({
 		url,
 		method: 'GET',
-		headers: {
+		headers: withMdfridayClientHeader(url, {
 			...authHeaders(plugin),
 			'Cache-Control': 'no-cache',
 			Pragma: 'no-cache',
-		},
+		}),
 	});
 	if (response.status !== 200) {
 		return new Map();
@@ -136,7 +137,7 @@ async function fetchEntitlements(
 		const response = await requestUrl({
 			url: `${apiBase}/v1/me/theme-entitlements`,
 			method: 'GET',
-			headers: authHeaders(plugin),
+			headers: withMdfridayClientHeader(`${apiBase}/v1/me/theme-entitlements`, authHeaders(plugin)),
 		});
 		if (response.status !== 200) return null;
 		return response.json as {
@@ -161,7 +162,7 @@ async function fetchCatalog(plugin?: FridayPlugin): Promise<CatalogEntry[]> {
 		const response = await requestUrl({
 			url: `${apiBase}/v1/theme-catalog`,
 			method: 'GET',
-			headers: authHeaders(plugin),
+			headers: withMdfridayClientHeader(`${apiBase}/v1/theme-catalog`, authHeaders(plugin)),
 		});
 		if (response.status !== 200) {
 			throw new Error(`Theme catalog unavailable (${response.status})`);

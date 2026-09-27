@@ -1,5 +1,6 @@
 import type FridayPlugin from '../main';
 import {Notice, requestUrl, TFile} from 'obsidian';
+import {withMdfridayClientHeader} from '../mdfriday-client';
 import type {TFolder} from 'obsidian';
 import type {ObsidianProjectCreateOptions} from '@mdfriday/foundry';
 import type {ProgressUpdate, PublishProgressUpdate} from '../types/events';
@@ -517,7 +518,7 @@ export class ProjectServiceManager {
 			const res = await requestUrl({
 				url: `${apiBase}/v1/account`,
 				method: 'GET',
-				headers: { Authorization: `Bearer ${key}` },
+				headers: withMdfridayClientHeader(`${apiBase}/v1/account`, { Authorization: `Bearer ${key}` }),
 				throw: false,
 			});
 			if (res.status < 200 || res.status >= 300) {
@@ -795,7 +796,7 @@ export class ProjectServiceManager {
 			const res = await requestUrl({
 				url,
 				method: 'GET',
-				headers: { Authorization: `Bearer ${auth.token}` },
+				headers: withMdfridayClientHeader(url, { Authorization: `Bearer ${auth.token}` }),
 				throw: false,
 			});
 			if (res.status < 200 || res.status >= 300) {
@@ -897,6 +898,7 @@ export class ProjectServiceManager {
 		const publishResult = await this.publish(projectName, {
 			method: 'cloudflare',
 			hostingMode: ensured.hostingMode,
+			releaseMode: skipBuild ? 'as-is' : 'themed',
 			onProgress: (progress) => onProgress?.(progress),
 			...this.publishIdentityFromSelection(),
 		});
@@ -1026,6 +1028,7 @@ export class ProjectServiceManager {
 					const publishResult = await this.publish(projectName, {
 						method: 'cloudflare',
 						config: publishConfig?.config,
+						releaseMode: 'themed',
 						...this.publishIdentityFromSelection(),
 						onProgress: (progress) => {
 							onProgress?.({
@@ -1113,11 +1116,22 @@ export class ProjectServiceManager {
 			sourcePath?: string;
 			kind?: 'note' | 'folder';
 			title?: string;
+			/** Recorded on the release: as-is (Obsidian renderer) vs themed (Foundry SSG). */
+			releaseMode?: 'as-is' | 'themed';
 			onProgress?: (progress: PublishProgressUpdate) => void;
 		}
 	): Promise<PublishResult> {
 		try {
 			const { onProgress } = options;
+			// Foundry ≥ the release that adds `releaseTheme` fills themed id/version from
+			// config params.mdfriday; older Foundry ignores the extra option.
+			const releaseTheme =
+				options.releaseMode === 'as-is'
+					? { id: 'as-is', version: this.plugin.manifest.version, mode: 'as-is' as const }
+					: options.releaseMode === 'themed'
+						? { mode: 'themed' as const }
+						: undefined;
+			const releaseOpts: Record<string, unknown> = releaseTheme ? { releaseTheme } : {};
 			const foundry = this.plugin.foundryPublishService;
 			if (!foundry) {
 				return { success: false, error: 'Publish service not initialized' };
@@ -1145,6 +1159,7 @@ export class ProjectServiceManager {
 					...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
 					...(options.kind ? { kind: options.kind } : {}),
 					...(options.title ? { title: options.title } : {}),
+					...releaseOpts,
 				},
 				onProgress,
 			);
