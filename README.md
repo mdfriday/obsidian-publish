@@ -32,6 +32,16 @@ Many publishing solutions require:
 MDFriday Publish removes that complexity.
 Publish directly from Obsidian with a single click.
 
+## Product Vision
+
+> **MD + Theme = Sites**
+
+MDFriday turns the Markdown you already own into websites, then helps you turn those websites into businesses. The core idea is simple:
+
+**Markdown → Theme → Site → Business**
+
+MDFriday is local-first, so your Markdown remains the source of truth and your built websites remain portable. For the complete product vision, architecture, capabilities, and roadmap, see the **[MDFriday Product Map](./product-map.md)**.
+
 ## Network use & privacy
 
 - Publishing requires network access. The plugin talks to the MDFriday API (`api.mdfriday.com`) for guest/account sessions, projects, releases, custom domains and billing; uploads your built site to Cloudflare R2 using short-lived, per-release credentials; and loads the theme catalog and theme packs from `cdn.mdfriday.com`. The plugin itself sends no analytics or telemetry.
