@@ -29,6 +29,7 @@
 	export let siteName: string;
 	export let siteLogo: string;
 	export let siteFavicon: string;
+	export let siteNavLinks: Array<{ title: string; url: string }> = [];
 
 	export let showAuthTip: boolean;
 	export let authPrepareStep: 'idle' | 'prepare' | 'waiting' = 'idle';
@@ -69,9 +70,25 @@
 	export let onPickFavicon: () => void;
 	export let onClearLogo: () => void;
 	export let onClearFavicon: () => void;
+	export let onNavLinksChange: (links: Array<{ title: string; url: string }>) => void;
 
 	$: logoPreview = siteLogo ? vaultImageSrc(plugin.app, siteLogo) : '';
 	$: faviconPreview = siteFavicon ? vaultImageSrc(plugin.app, siteFavicon) : '';
+
+	function updateNavLink(index: number, field: 'title' | 'url', value: string) {
+		const next = siteNavLinks.map((link, i) =>
+			i === index ? { ...link, [field]: value } : link,
+		);
+		onNavLinksChange(next);
+	}
+
+	function removeNavLink(index: number) {
+		onNavLinksChange(siteNavLinks.filter((_, i) => i !== index));
+	}
+
+	function addNavLink() {
+		onNavLinksChange([...siteNavLinks, { title: '', url: '' }]);
+	}
 	export let onPublish: () => void;
 	export let onPreview: () => void;
 	export let onStopPreview: () => void;
@@ -974,6 +991,58 @@
 										<button type="button" class="brand-clear" on:click={onClearFavicon}>{t('ui.brand_clear')}</button>
 									{/if}
 								</div>
+							</div>
+
+							<div class="field-group">
+								<div class="field-label">{t('ui.nav_links')}</div>
+								<table class="nav-links-table">
+									<thead>
+										<tr>
+											<th>{t('ui.nav_links_title_col')}</th>
+											<th>{t('ui.nav_links_url_col')}</th>
+											<th aria-label={t('ui.nav_links_remove')}></th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each siteNavLinks as link, i (i)}
+											<tr>
+												<td>
+													<input
+														class="nav-links-input"
+														type="text"
+														placeholder={t('ui.nav_links_title_placeholder')}
+														value={link.title}
+														on:input={(e) =>
+															updateNavLink(i, 'title', (e.currentTarget as HTMLInputElement).value)}
+													/>
+												</td>
+												<td>
+													<input
+														class="nav-links-input"
+														type="text"
+														placeholder={t('ui.nav_links_url_placeholder')}
+														value={link.url}
+														on:input={(e) =>
+															updateNavLink(i, 'url', (e.currentTarget as HTMLInputElement).value)}
+													/>
+												</td>
+												<td class="nav-links-actions">
+													<button
+														type="button"
+														class="nav-links-remove"
+														on:click={() => removeNavLink(i)}
+													>
+														{t('ui.nav_links_remove')}
+													</button>
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+								<button type="button" class="nav-links-add" on:click={addNavLink}>
+									+ {t('ui.nav_links_add')}
+								</button>
+								<p class="helper">{t('ui.nav_links_helper')}</p>
 							</div>
 
 							<div class="field-group">

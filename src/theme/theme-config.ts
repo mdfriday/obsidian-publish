@@ -6,6 +6,7 @@ const PRESERVED_PARAM_KEYS = new Set([
 	'password',
 	'logo',
 	'favicon',
+	'navLinks',
 	'disqusShortname',
 	'autoPublish',
 	'lastPublishUrl',
@@ -54,8 +55,8 @@ export function entryToModuleImport(entry: CatalogEntry): { path: string } {
  * Merge theme siteParams into existing config.params.
  * Capability keys always follow the theme. customParams fill only when the project
  * does not already have that key, so a user logo survives the next apply.
- * navLinks is not taken from the theme: Advanced cannot edit it yet, so new projects
- * default to []. Once a project already has navLinks (future UI), that value is kept.
+ * navLinks are owned by Advanced settings: never seed from the theme; keep the
+ * project's value (or [] for new projects).
  */
 export function mergeThemeSiteParams(
 	existingParams: Record<string, unknown> | undefined,
@@ -79,7 +80,7 @@ export function mergeThemeSiteParams(
 	const siteParams = entry.siteParams ?? {};
 	const params: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(siteParams)) {
-		// Do not seed navLinks from the theme — plugin has no editor yet.
+		// Advanced owns navLinks — do not overwrite with theme defaults.
 		if (key === 'navLinks') continue;
 		if (THEME_CAPABILITY_PARAM_KEYS.has(key) || !(key in prev)) {
 			params[key] = value;
@@ -91,8 +92,6 @@ export function mergeThemeSiteParams(
 		if (!(key in params)) params[key] = value;
 	}
 	params.mdfriday = mdfriday;
-	// Default empty for new projects; keep whatever the project already stored
-	// (today usually [], later whatever Advanced writes).
 	params.navLinks = 'navLinks' in prev ? prev.navLinks : [];
 	return params;
 }

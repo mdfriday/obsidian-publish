@@ -144,6 +144,7 @@
 	let sitePassword = '';
 	let siteLogo = '';
 	let siteFavicon = '';
+	let siteNavLinks: Array<{ title: string; url: string }> = [];
 	
 	// UI state
 	let autoPublishEnabled = false;
@@ -455,13 +456,7 @@
 		}
 		siteLogo = brandPathForUi(state.config.params?.logo);
 		siteFavicon = brandPathForUi(state.config.params?.favicon);
-
-		// Migration (pre-navLinks UI): clear theme-seeded navLinks so sites match
-		// Advanced (no editor → empty). After Advanced can edit navLinks, remove this.
-		const existingNav = state.config.params?.navLinks;
-		if (Array.isArray(existingNav) && existingNav.length > 0) {
-			await saveFoundryConfig('params.navLinks', []);
-		}
+		siteNavLinks = normalizeNavLinks(state.config.params?.navLinks);
 		
 		// Load auto-publish setting
 		if (state.config.params?.autoPublish !== undefined) {
@@ -539,6 +534,7 @@
 		sitePassword = '';
 		siteLogo = '';
 		siteFavicon = '';
+		siteNavLinks = [];
 		autoPublishEnabled = false;
 		googleAnalyticsId = '';
 		disqusShortname = '';
@@ -1229,6 +1225,33 @@
 		await saveFoundryConfig('params.password', sitePassword.trim() || '');
 		await saveFoundryConfig('params.logo', siteLogo.trim());
 		await saveFoundryConfig('params.favicon', siteFavicon.trim());
+		await saveFoundryConfig('params.navLinks', serializeNavLinks(siteNavLinks));
+	}
+
+	function normalizeNavLinks(raw: unknown): Array<{ title: string; url: string }> {
+		if (!Array.isArray(raw)) return [];
+		const out: Array<{ title: string; url: string }> = [];
+		for (const item of raw) {
+			if (!item || typeof item !== 'object') continue;
+			const rec = item as Record<string, unknown>;
+			const title = typeof rec.title === 'string' ? rec.title : '';
+			const url = typeof rec.url === 'string' ? rec.url : '';
+			out.push({ title, url });
+		}
+		return out;
+	}
+
+	function serializeNavLinks(
+		links: Array<{ title: string; url: string }>,
+	): Array<{ title: string; url: string }> {
+		return links
+			.map((l) => ({ title: l.title.trim(), url: l.url.trim() }))
+			.filter((l) => l.title.length > 0 && l.url.length > 0);
+	}
+
+	function handleNavLinksChange(links: Array<{ title: string; url: string }>) {
+		siteNavLinks = links;
+		scheduleBrandSave();
 	}
 
 	function scheduleBrandSave() {
@@ -2346,6 +2369,7 @@
 	{siteName}
 	{siteLogo}
 	{siteFavicon}
+	{siteNavLinks}
 	{showAuthTip}
 	{authPrepareStep}
 	{isPublishing}
@@ -2377,6 +2401,7 @@
 	onPickFavicon={() => chooseBrandImage('favicon')}
 	onClearLogo={() => clearBrandImage('logo')}
 	onClearFavicon={() => clearBrandImage('favicon')}
+	onNavLinksChange={handleNavLinksChange}
 	onPublish={() => startPublish({ allowGuestBootstrap: true })}
 	onPreview={startPreview}
 	onStopPreview={stopPreview}
