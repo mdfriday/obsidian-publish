@@ -746,10 +746,14 @@
 
 	function buildPublishUrl(resultUrl: string): string {
 		if (!resultUrl) return '';
-		if (/^https?:\/\//i.test(resultUrl)) return resultUrl;
-		const base = resolvePublicBaseUrl(plugin.settings);
-		const path = resultUrl.startsWith('/') ? resultUrl : `/${resultUrl}`;
-		return `${base}${path}`;
+		let url = resultUrl;
+		if (!/^https?:\/\//i.test(url)) {
+			const base = resolvePublicBaseUrl(plugin.settings);
+			const path = url.startsWith('/') ? url : `/${url}`;
+			url = `${base}${path}`;
+		}
+		// Hosting redirects directory URLs to index.html — don't force the suffix in the UI.
+		return url.replace(/\/index\.html$/i, '/');
 	}
 
 	async function persistLastPublishUrl(url: string) {
@@ -1625,7 +1629,7 @@
 				url = `https://${match.domainHostname.replace(/\/$/, '')}/`;
 			} else if (match.siteId) {
 				const publicBase = resolvePublicBaseUrl(plugin.settings);
-				url = `${publicBase}/s/${match.siteId}/index.html`;
+				url = `${publicBase.replace(/\/$/, '')}/s/${match.siteId}/`;
 			}
 
 			if (!stillCurrent()) return;
@@ -2165,23 +2169,20 @@
 		if (!ok) return;
 
 		const foundry = plugin.foundryPublishService;
-		const name = plugin.currentProjectName || projectName;
-		if (!foundry || !name) {
-			new Notice(t('ui.revoke_share_done'), 4000);
+		if (!foundry) {
+			new Notice(
+				plugin.i18n?.t?.('ui.history_no_url') || 'No published project to unpublish.',
+				4000,
+			);
 			return;
 		}
 
 		try {
-			const bind = await foundry.getCloudflareBinding({
-				workspacePath: plugin.absWorkspacePath,
-				projectName: name,
-			});
-			if (!bind.success || !bind.cloudflareProjectId) {
-				new Notice(
-					plugin.i18n?.t?.('ui.history_no_url') || 'No published project to unpublish.',
-					4000,
-				);
-				return;
+			// Soft-follow may show published URL without a local Foundry project yet.
+			let name = plugin.currentProjectName || projectName;
+			if (!name) {
+				await plugin.ensureProjectForSelection();
+				name = plugin.currentProjectName || projectName;
 			}
 
 			const mgr = plugin.projectServiceManager;
@@ -2192,34 +2193,85 @@
 				return;
 			}
 
-			const res = await foundry.unpublishProject(token, bind.cloudflareProjectId);
+			let projectId: string | undefined;
+			let hasLocalBinding = false;
+
+			if (name) {
+				const bind = await foundry.getCloudflareBinding({
+					workspacePath: plugin.absWorkspacePath,
+					projectName: name,
+				});
+				if (bind.success && bind.cloudflareProjectId) {
+					projectId = bind.cloudflareProjectId;
+					hasLocalBinding = true;
+				}
+			}
+
+			// Fallback: resolve remote project by vault sourcePath (UI may already show live URL).
+			if (!projectId && mgr) {
+				const vaultPath =
+					activeVaultPath ||
+					selectionVaultPath(site.getCurrentContents()) ||
+					null;
+				const listed = await mgr.listRemoteCloudflareProjects();
+				if (listed.success && listed.projects?.length && vaultPath) {
+					const match = listed.projects.find(
+						(p) =>
+							pathsEqual(p.sourcePath, vaultPath) &&
+							p.status !== 'deleted' &&
+							p.status !== 'draft' &&
+							p.status !== 'unpublished' &&
+							!!p.id,
+					);
+					if (match?.id) {
+						projectId = match.id;
+					}
+				}
+			}
+
+			if (!projectId) {
+				new Notice(
+					plugin.i18n?.t?.('ui.history_no_url') || 'No published project to unpublish.',
+					4000,
+				);
+				return;
+			}
+
+			const res = await foundry.unpublishProject(token, projectId);
 			if (!res.success) {
 				new Notice(res.error || 'Unpublish failed', 5000);
 				return;
 			}
 
 			// Best-effort: drop custom domain binding so local project returns to share mode.
-			try {
-				const domains = await foundry.listDomains(token, bind.cloudflareProjectId);
-				const list = domains.domains || [];
-				const active = list.find((d) => d.status === 'active' || d.status === 'pending');
-				if (active?.id) {
-					await foundry.removeDomain(token, active.id);
-					await foundry.markBindingShare({
-						workspacePath: plugin.absWorkspacePath,
-						projectName: name,
-						publicBaseUrl: plugin.settings.cloudflarePublicBaseUrl,
-					});
+			if (name && hasLocalBinding) {
+				try {
+					const domains = await foundry.listDomains(token, projectId);
+					const list = domains.domains || [];
+					const active = list.find((d) => d.status === 'active' || d.status === 'pending');
+					if (active?.id) {
+						await foundry.removeDomain(token, active.id);
+						await foundry.markBindingShare({
+							workspacePath: plugin.absWorkspacePath,
+							projectName: name,
+							publicBaseUrl: plugin.settings.cloudflarePublicBaseUrl,
+						});
+					}
+				} catch (error) {
+					console.warn('[Site] revokeShare domain cleanup failed:', error);
 				}
-			} catch (error) {
-				console.warn('[Site] revokeShare domain cleanup failed:', error);
 			}
 
 			publishSuccess = false;
 			publishUrl = '';
 			publishRevoked = true;
 			lastCompletedAction = null;
-			await saveFoundryConfig('params.lastPublishUrl', '');
+			if (name) {
+				await saveFoundryConfig('params.lastPublishUrl', '');
+				// LIVE objects are gone — next publish must upload a full tree.
+				await mgr?.clearCloudflarePublishManifest(name);
+			}
+			historyRefreshKey += 1;
 			new Notice(t('ui.revoke_share_done'), 4000);
 		} catch (error) {
 			console.error('[Site] revokeShare failed:', error);

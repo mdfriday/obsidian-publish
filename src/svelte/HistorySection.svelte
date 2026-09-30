@@ -90,18 +90,19 @@
 		bindingPublicBaseUrl?: string;
 		hostingMode?: 'share' | 'custom';
 	}): string {
-		if (opts.apiPublicUrl) return opts.apiPublicUrl;
+		const normalize = (u: string) => u.replace(/\/index\.html$/i, '/');
+		if (opts.apiPublicUrl) return normalize(opts.apiPublicUrl);
 		const siteId = opts.siteId;
 		if (siteId && opts.hostingMode !== 'custom') {
 			const root =
 				resolvePublicBaseUrl(plugin.settings) ||
 				opts.bindingPublicBaseUrl ||
 				'';
-			return `${computeShareBaseUrl(root, siteId).replace(/\/$/, '')}/index.html`;
+			return computeShareBaseUrl(root, siteId);
 		}
-		const bindBase = (opts.bindingPublicBaseUrl || '').replace(/\/?$/, '');
+		const bindBase = (opts.bindingPublicBaseUrl || '').replace(/\/?$/, '/');
 		if (bindBase.includes('/s/')) {
-			return `${bindBase}/index.html`;
+			return bindBase;
 		}
 		return '';
 	}

@@ -1102,6 +1102,46 @@ export class ProjectServiceManager {
 	// ==================== 发布 ====================
 
 	/**
+	 * After unpublish the share LIVE prefix is empty. Drop the local Cloudflare
+	 * publish manifest so the next publish uploads a full tree (incl. index.html)
+	 * instead of an incremental diff that skips unchanged files.
+	 */
+	async clearCloudflarePublishManifest(projectName: string): Promise<void> {
+		try {
+			const info = await this.getProjectInfo(projectName);
+			if (!info?.path) return;
+			const manifestPath = path.join(info.path, '.mdfriday', 'manifest-cloudflare.json');
+			await fs.promises.unlink(manifestPath);
+		} catch (error) {
+			const err = error as NodeJS.ErrnoException;
+			if (err?.code !== 'ENOENT') {
+				console.warn('[ProjectServiceManager] clearCloudflarePublishManifest failed:', error);
+			}
+		}
+	}
+
+	/** True when remote site has no live content (unpublished / missing) — needs full upload. */
+	async remoteNeedsFullUpload(projectName: string): Promise<boolean> {
+		const foundry = this.plugin.foundryPublishService;
+		if (!foundry) return false;
+		try {
+			const bind = await foundry.getCloudflareBinding({
+				workspacePath: this.plugin.absWorkspacePath,
+				projectName,
+			});
+			if (!bind.success || !bind.cloudflareProjectId) return false;
+			const listed = await this.listRemoteCloudflareProjects();
+			if (!listed.success || !listed.projects?.length) return false;
+			const match = listed.projects.find((p) => p.id === bind.cloudflareProjectId);
+			if (!match) return false;
+			return match.status === 'unpublished' || match.status === 'draft';
+		} catch (error) {
+			console.warn('[ProjectServiceManager] remoteNeedsFullUpload failed:', error);
+			return false;
+		}
+	}
+
+	/**
 	 * 发布项目 — 仅通过 Foundry ObsidianPublishService（auth → bind → R2）。
 	 * 插件不直接请求 Cloudflare API。
 	 *
@@ -1118,6 +1158,8 @@ export class ProjectServiceManager {
 			title?: string;
 			/** Recorded on the release: as-is (Obsidian renderer) vs themed (Foundry SSG). */
 			releaseMode?: 'as-is' | 'themed';
+			/** Force full tree upload (also auto when remote is unpublished). */
+			force?: boolean;
 			onProgress?: (progress: PublishProgressUpdate) => void;
 		}
 	): Promise<PublishResult> {
@@ -1145,6 +1187,12 @@ export class ProjectServiceManager {
 				};
 			}
 
+			const hostingMode = options.hostingMode ?? 'share';
+			const forceFull =
+				options.force === true ||
+				hostingMode === 'custom' ||
+				(await this.remoteNeedsFullUpload(projectName));
+
 			const result = await foundry.publishCloudflare(
 				{
 					workspacePath: this.plugin.absWorkspacePath,
@@ -1153,9 +1201,10 @@ export class ProjectServiceManager {
 					guest: auth.kind === 'guest',
 					apiBaseUrl: this.plugin.settings.cloudflareApiBaseUrl,
 					publicBaseUrl: this.plugin.settings.cloudflarePublicBaseUrl,
-					hostingMode: options.hostingMode ?? 'share',
-					// Custom: empty release prefix needs full tree until server copyFrom exists
-					force: options.hostingMode === 'custom',
+					hostingMode,
+					// Custom: empty release prefix needs full tree until server copyFrom exists.
+					// Share after unpublish: LIVE prefix is empty — incremental would skip index.html.
+					force: forceFull,
 					...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
 					...(options.kind ? { kind: options.kind } : {}),
 					...(options.title ? { title: options.title } : {}),

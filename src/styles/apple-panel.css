@@ -636,6 +636,46 @@
   margin-bottom: 6px;
 }
 
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .project-strip .status-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--apple-text);
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .project-strip .url-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: baseline;
+  column-gap: 10px;
+  margin-bottom: 4px;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .project-strip .strip-unpublish {
+  grid-column: 2;
+  justify-self: end;
+  align-self: baseline;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--apple-secondary) !important;
+  font-size: 11px !important;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1.4;
+  text-decoration: underline !important;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .project-strip .strip-unpublish:hover {
+  color: var(--apple-text) !important;
+  background: transparent !important;
+  text-decoration: underline !important;
+}
+
 .workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .status-dot {
   width: 7px;
   height: 7px;
@@ -652,18 +692,17 @@
   background: var(--apple-warning);
 }
 
-.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .project-strip .status-text {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--apple-text);
-}
-
 .workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .project-strip .url-line {
+  grid-column: 1;
+  width: auto !important;
+  max-width: 100%;
+  min-width: 0;
+  display: block;
   font-size: 12px;
   color: var(--apple-blue);
   font-family: var(--font-mono);
   word-break: break-all;
-  margin-bottom: 4px;
+  margin: 0 !important;
   cursor: pointer;
 }
 

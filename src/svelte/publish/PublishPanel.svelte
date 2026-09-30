@@ -568,15 +568,27 @@
 							</span>
 						</div>
 						{#if publishUrl}
-							<!-- svelte-ignore a11y-click-events-have-key-events -->
-							<!-- svelte-ignore a11y-no-static-element-interactions -->
-							<div
-								class="url-line"
-								class:disabled={projectStatus === 'revoked'}
-								title={t('ui.copy')}
-								on:click={copyProjectUrl}
-							>
-								{publishUrl}
+							<div class="url-row">
+								<!-- svelte-ignore a11y-click-events-have-key-events -->
+								<!-- svelte-ignore a11y-no-static-element-interactions -->
+								<div
+									class="url-line"
+									class:disabled={projectStatus === 'revoked'}
+									title={t('ui.copy')}
+									on:click={copyProjectUrl}
+								>
+									{publishUrl}
+								</div>
+								{#if projectStatus === 'published'}
+									<!-- svelte-ignore a11y-invalid-attribute -->
+									<a
+										href="#"
+										class="strip-unpublish"
+										on:click|preventDefault|stopPropagation={onRevokeShare}
+									>
+										{t('ui.history_unpublish')}
+									</a>
+								{/if}
 							</div>
 						{/if}
 						{#if pathRemembered}
