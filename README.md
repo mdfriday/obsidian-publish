@@ -4,10 +4,6 @@
 
 Publish a note or a folder from Obsidian as a website. No Git. No GitHub. No build pipelines. Just right click and publish.
 
-## Help us improve MDFriday Publish
-
-- Discord: https://discord.gg/t9F93FChT
-
 ## Publish a note exactly as you see it in Obsidian
 ![GIF: Publish a Note as-is](assets/as-is.gif)
 
@@ -16,6 +12,20 @@ Publish a note or a folder from Obsidian as a website. No Git. No GitHub. No bui
 
 ## Publish a folder as a Wiki
 ![GIF: Publish a Wiki](assets/wiki.gif)
+
+## Join the MDFriday Community
+
+Need help getting started? Want to share feedback or request new features?
+
+Join our Discord community to:
+
+- Get support and answers to your questions
+- Discuss publishing workflows with other users
+- Request new features and influence the roadmap
+- Get early access to new releases
+- Receive community-only discounts and offers
+
+Discord: https://discord.gg/t9F93FChT
 
 ## Why MDFriday Publish?
 
