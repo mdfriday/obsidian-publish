@@ -2,7 +2,7 @@
 
 **One click. Turn notes into websites.**
 
-Publish a note or a folder from Obsidian as a website. No Git. No GitHub. No build pipelines. Just right click and publish.
+10 Seconds from Plugin Install to a Live Obsidian Website - No Git, No GitHub, No Setup. Publish a note or a folder from Obsidian as a website. Just right click and publish.
 
 ## Publish a note exactly as you see it in Obsidian
 ![GIF: Publish a Note as-is](assets/as-is.gif)
