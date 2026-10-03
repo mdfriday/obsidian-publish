@@ -73,6 +73,7 @@ export interface PublicCatalogEntry {
 		description?: string;
 	}>;
 	siteParams?: Record<string, unknown>;
+	capabilities?: string[];
 }
 
 export function mergePublicCatalogEntry(
@@ -99,6 +100,7 @@ export function mergePublicCatalogEntry(
 		official: entry.official,
 		userAssets: entry.userAssets,
 		siteParams: entry.siteParams,
+		capabilities: Array.isArray(entry.capabilities) ? entry.capabilities : [],
 		description: entry.tags?.length ? entry.tags.join(' · ') : entry.name,
 		thumbnail: entry.coverUrl,
 	};

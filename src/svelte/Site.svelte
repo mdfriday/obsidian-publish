@@ -16,6 +16,7 @@
 	import type { CatalogEntry } from "../theme/types";
 	import type { ProjectState, ProgressUpdate, PublishProgressUpdate } from "../types/events";
 	import { buildThemeConfigPatch } from "../theme/theme-config";
+	import { mergeSubscribeUi, readSubscribeParams } from "../subscribe/subscribe-core";
 	import { brandPathForUi, userBrandPath } from "../branding/brand-path";
 	import { pickVaultImage } from "../branding/pick-vault-image";
 	import { resolvePublicBaseUrl, resolveSiteBaseUrl } from "../cloudflare-env";
@@ -145,6 +146,10 @@
 	let siteLogo = '';
 	let siteFavicon = '';
 	let siteNavLinks: Array<{ title: string; url: string }> = [];
+	// Subscribe capability (params.subscribe) — UI fields; project/endpoint are stamped at publish.
+	let subscribeEnabled = false;
+	let subscribeTitle = '';
+	let subscribeDescription = '';
 	
 	// UI state
 	let autoPublishEnabled = false;
@@ -270,6 +275,7 @@
 		'params.lastPublishUrl',
 		'params.logo',
 		'params.favicon',
+		'params.subscribe',
 	]);
 
 	async function saveFoundryConfig(key: string, value: any) {
@@ -457,6 +463,14 @@
 		siteLogo = brandPathForUi(state.config.params?.logo);
 		siteFavicon = brandPathForUi(state.config.params?.favicon);
 		siteNavLinks = normalizeNavLinks(state.config.params?.navLinks);
+		{
+			const sub = readSubscribeParams(
+				(state.config.params as Record<string, unknown> | undefined)?.subscribe,
+			);
+			subscribeEnabled = !!sub?.enabled;
+			subscribeTitle = sub?.title ?? '';
+			subscribeDescription = sub?.description ?? '';
+		}
 		
 		// Load auto-publish setting
 		if (state.config.params?.autoPublish !== undefined) {
@@ -535,6 +549,9 @@
 		siteLogo = '';
 		siteFavicon = '';
 		siteNavLinks = [];
+		subscribeEnabled = false;
+		subscribeTitle = '';
+		subscribeDescription = '';
 		autoPublishEnabled = false;
 		googleAnalyticsId = '';
 		disqusShortname = '';
@@ -1226,6 +1243,27 @@
 		await saveFoundryConfig('params.logo', siteLogo.trim());
 		await saveFoundryConfig('params.favicon', siteFavicon.trim());
 		await saveFoundryConfig('params.navLinks', serializeNavLinks(siteNavLinks));
+		await persistSubscribeFields();
+	}
+
+	/** params.subscribe from the Advanced ▸ Subscribe fields; guests are always written disabled. */
+	async function persistSubscribeFields() {
+		if (!plugin.currentProjectName || plugin.isProjectInitializing) return;
+		const existing = await plugin.getFoundryProjectConfigMap(plugin.currentProjectName);
+		const prevParams = existing['params'] as Record<string, unknown> | undefined;
+		const next = mergeSubscribeUi(
+			prevParams?.subscribe,
+			{ enabled: subscribeEnabled, title: subscribeTitle, description: subscribeDescription },
+			{ guest: isGuestAccount },
+		);
+		if (next) await saveFoundryConfig('params.subscribe', next);
+	}
+
+	function handleSubscribeChange(fields: { enabled: boolean; title: string; description: string }) {
+		subscribeEnabled = fields.enabled;
+		subscribeTitle = fields.title;
+		subscribeDescription = fields.description;
+		scheduleBrandSave();
 	}
 
 	function normalizeNavLinks(raw: unknown): Array<{ title: string; url: string }> {
@@ -2370,6 +2408,10 @@
 	{siteLogo}
 	{siteFavicon}
 	{siteNavLinks}
+	{subscribeEnabled}
+	{subscribeTitle}
+	{subscribeDescription}
+	onSubscribeChange={handleSubscribeChange}
 	{showAuthTip}
 	{authPrepareStep}
 	{isPublishing}

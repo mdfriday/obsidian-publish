@@ -5,6 +5,7 @@
 	import { TFile, TFolder } from 'obsidian';
 	import { vaultImageSrc } from '../../branding/pick-vault-image';
 	import DomainSection from '../DomainSection.svelte';
+	import SubscribeSection from '../SubscribeSection.svelte';
 	import HistorySection from '../HistorySection.svelte';
 	import { filterThemesForSelection } from '../../utils/theme';
 	import { resolveSiteBaseUrl } from '../../cloudflare-env';
@@ -30,6 +31,10 @@
 	export let siteLogo: string;
 	export let siteFavicon: string;
 	export let siteNavLinks: Array<{ title: string; url: string }> = [];
+	export let subscribeEnabled = false;
+	export let subscribeTitle = '';
+	export let subscribeDescription = '';
+	export let onSubscribeChange: (fields: { enabled: boolean; title: string; description: string }) => void = () => {};
 
 	export let showAuthTip: boolean;
 	export let authPrepareStep: 'idle' | 'prepare' | 'waiting' = 'idle';
@@ -142,6 +147,8 @@
 	) as PlanTier;
 	$: isPersonal = planTier === 'personal';
 	$: isGuest = planTier === 'guest';
+	$: subscribeThemeEntry =
+		publishMode === 'themed' ? themeList.find((e) => e.slug === selectedThemeSlug) ?? null : null;
 
 	let prevAccountEpoch = 0;
 	$: if (accountEpoch !== prevAccountEpoch) {
@@ -1074,6 +1081,21 @@
 								/>
 								<p class="helper">{t('ui.password_helper')}</p>
 							</div>
+
+							<SubscribeSection
+								{plugin}
+								{t}
+								{projectName}
+								{isGuest}
+								themeEntry={subscribeThemeEntry}
+								enabled={subscribeEnabled}
+								title={subscribeTitle}
+								description={subscribeDescription}
+								sourcePath={activeVaultPath}
+								refreshKey={historyRefreshKey + accountEpoch * 1000}
+								onChange={onSubscribeChange}
+								onSignIn={() => void openClaimAccount()}
+							/>
 
 							<div class="field-group">
 								<div class="field-label">

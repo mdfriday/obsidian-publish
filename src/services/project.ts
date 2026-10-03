@@ -24,6 +24,7 @@ import {
 	writeRewrittenNoteContent,
 } from '../media/note-media';
 import { brandPathsFromParams } from '../branding/brand-path';
+import { syncSubscribeOnPublish } from '../subscribe/subscribe-service';
 import { stageBrandAssets } from '../branding/stage-brand-assets';
 
 /** Share mode baseURL per arch/03-build-contract.md */
@@ -656,6 +657,8 @@ export class ProjectServiceManager {
 	): Promise<
 		| {
 				siteId: string;
+				/** Remote projects.id (p_…) — subscribe form `project` param. */
+				projectId: string;
 				baseURL: string;
 				hostingMode: 'share' | 'custom';
 				publicUrl: string;
@@ -756,8 +759,20 @@ export class ProjectServiceManager {
 			console.warn('[ProjectServiceManager] Failed to persist baseURL');
 		}
 
+		// Subscribe capability: stamp project id + endpoint into params.subscribe, PATCH the server flag on change.
+		if (binding.cloudflareProjectId) {
+			await syncSubscribeOnPublish(this.plugin, {
+				projectName,
+				projectId: binding.cloudflareProjectId,
+				auth,
+				getConfig: (name) => this.getConfig(name),
+				saveConfig: (name, key, value) => this.saveConfig(name, key, value),
+			});
+		}
+
 		return {
 			siteId: binding.siteId || '',
+			projectId: binding.cloudflareProjectId || '',
 			baseURL,
 			hostingMode,
 			publicUrl,

@@ -42,6 +42,7 @@ import {
 	resolveAccountBaseUrl,
 } from './cloudflare-env';
 import {registerMdfridayApiBaseUrl, setMdfridayClientVersion} from './mdfriday-client';
+import {openSubscriberExportPicker} from './subscribe/subscribe-service';
 
 // PC-only module types (dynamically imported)
 import type {Site} from "./site";
@@ -389,6 +390,14 @@ export default class FridayPlugin extends Plugin {
 				if (view) {
 					void this.quickShareCurrentFile(view);
 				}
+			},
+		});
+
+		this.addCommand({
+			id: 'export-subscribers',
+			name: this.i18n.t('ui.subscribe_command_export'),
+			callback: () => {
+				void openSubscriberExportPicker(this);
 			},
 		});
 

@@ -30,6 +30,8 @@ export interface CatalogEntry {
 	 * Written into config.json when the theme is applied.
 	 */
 	siteParams?: Record<string, unknown>;
+	/** Manifest capabilities that are true (e.g. "subscribe" = the theme places the subscribe form). */
+	capabilities?: string[];
 }
 
 /** @deprecated Use CatalogEntry */

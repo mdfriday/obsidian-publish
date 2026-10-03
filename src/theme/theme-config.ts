@@ -11,6 +11,8 @@ const PRESERVED_PARAM_KEYS = new Set([
 	'autoPublish',
 	'lastPublishUrl',
 	'mdfriday',
+	// Plugin-owned per site (enabled/title/description/project/endpoint) — survives theme switches.
+	'subscribe',
 ]);
 
 /**
