@@ -1,5 +1,10 @@
 import type {CatalogEntry, MdfridayThemeParams} from './types';
 
+/** Generate a temporary project ID for preview mode (not yet published). */
+function generatePreviewProjectId(): string {
+	return `local-${Date.now()}`;
+}
+
 /** User / plugin keys preserved across theme switches. */
 const PRESERVED_PARAM_KEYS = new Set([
 	'branding',
@@ -29,6 +34,7 @@ const THEME_CAPABILITY_PARAM_KEYS = new Set([
 	'readerMode',
 	'toc',
 	'llmCopy',
+	'subscribe',
 ]);
 
 export function entryToMdfridayParams(
@@ -85,7 +91,16 @@ export function mergeThemeSiteParams(
 		// Advanced owns navLinks — do not overwrite with theme defaults.
 		if (key === 'navLinks') continue;
 		if (THEME_CAPABILITY_PARAM_KEYS.has(key) || !(key in prev)) {
-			params[key] = value;
+			// Special handling for subscribe: generate preview project ID if not set
+			if (key === 'subscribe' && typeof value === 'object' && value !== null) {
+				const sub = { ...value } as Record<string, unknown>;
+				if (!sub.project) {
+					sub.project = generatePreviewProjectId();
+				}
+				params[key] = sub;
+			} else {
+				params[key] = value;
+			}
 		} else {
 			params[key] = prev[key];
 		}

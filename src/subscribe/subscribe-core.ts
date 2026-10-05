@@ -42,6 +42,11 @@ export function themeSupportsSubscribe(entry: { capabilities?: string[] } | null
 	return !!entry?.capabilities?.includes(SUBSCRIBE_CAPABILITY);
 }
 
+/** Check if a project ID is in preview mode (local-{timestamp} format). */
+export function isPreviewProjectId(project: string | null | undefined): boolean {
+	return typeof project === 'string' && project.startsWith('local-');
+}
+
 export function subscribeEndpoint(apiBaseUrl: string): string {
 	return `${(apiBaseUrl || '').replace(/\/+$/, '')}/v1/public/subscribe`;
 }
