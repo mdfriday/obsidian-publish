@@ -1,4 +1,4 @@
-import {FileSystemAdapter, MarkdownView, Menu, Notice, Platform, Plugin, TAbstractFile, TFile, TFolder} from 'obsidian';
+import {FileSystemAdapter, MarkdownView, Menu, Notice, Platform, Plugin, requestUrl, TAbstractFile, TFile, TFolder} from 'obsidian';
 import * as path from 'path';
 import {I18nService} from "./i18n";
 import {FridaySettingTab} from "./setting";
@@ -91,6 +91,12 @@ interface FridaySettings {
 	downloadServer: 'global' | 'east';
 	/** Unified MDF_… Key (guest or user). Kind is not encoded in the string. */
 	mdfKey: string | null;
+	/**
+	 * Which Cloudflare env minted / last validated this Key.
+	 * Cleared when compile-time env (dev=staging vs build=production) no longer matches —
+	 * otherwise claim on fsky.top 404s with a production Key (and vice versa).
+	 */
+	mdfKeyEnv: CloudflareEnvResolved | null;
 	/** Cached kind from GET /v1/account — display only */
 	mdfKeyKind: 'guest' | 'user' | null;
 	/** Cached plan from GET /v1/account */
@@ -133,6 +139,7 @@ interface FridaySettings {
 const DEFAULT_SETTINGS: FridaySettings = {
 	downloadServer: 'global',
 	mdfKey: null,
+	mdfKeyEnv: null,
 	mdfKeyKind: null,
 	mdfKeyPlan: null,
 	mdfStorageBytes: null,
@@ -246,6 +253,7 @@ export default class FridayPlugin extends Plugin {
 				const delivered = typeof params.key === 'string' ? params.key.trim() : '';
 				if (delivered.startsWith('MDF_')) {
 					this.settings.mdfKey = delivered;
+					this.settings.mdfKeyEnv = DEFAULT_CLOUDFLARE_ENV;
 					this.settings.mdfKeyKind = 'user';
 					await this.saveSettings();
 					this.foundryPublishService?.setKey?.(delivered, 'user');
@@ -1789,18 +1797,59 @@ export default class FridayPlugin extends Plugin {
 		if (!this.settings.mdfKey && this.settings.cloudflareGuestToken) {
 			this.settings.mdfKey = this.settings.cloudflareGuestToken;
 			this.settings.mdfKeyKind = 'guest';
+			this.settings.mdfKeyEnv = this.settings.mdfKeyEnv ?? DEFAULT_CLOUDFLARE_ENV;
 			this.settings.cloudflareGuestToken = null;
 			await this.saveData(this.settings);
 		}
 	}
 
+	/** Drop Key + account cache (env mismatch or revoked Key). */
+	clearMdfKey(reason?: string): void {
+		if (!this.settings.mdfKey && !this.settings.mdfKeyEnv) return;
+		console.info('[Friday] Clearing MDF Key', reason || '');
+		this.settings.mdfKey = null;
+		this.settings.mdfKeyEnv = null;
+		this.settings.mdfKeyKind = null;
+		this.settings.mdfKeyPlan = null;
+		this.settings.mdfStorageBytes = null;
+		this.settings.mdfQuotaStorageBytes = null;
+		this.settings.mdfContentExpiresAt = null;
+		this.settings.mdfProjectCount = null;
+		this.settings.mdfQuotaMaxProjects = null;
+		this.settings.mdfQuotaRetentionDays = null;
+		this.settings.mdfQuotaMaxCustomDomains = null;
+		this.settings.mdfQuotaFeatures = null;
+		this.settings.mdfAccountEmail = null;
+		this.foundryPublishService?.setKey?.('', 'guest');
+		this.refreshSettingsUi();
+	}
+
+	/** GET /v1/account with this Key against the given API — false if unknown / revoked. */
+	async probeMdfKey(key: string, apiBaseUrl: string): Promise<boolean> {
+		const base = apiBaseUrl.replace(/\/$/, '');
+		if (!key || !base) return false;
+		try {
+			const res = await requestUrl({
+				url: `${base}/v1/account`,
+				method: 'GET',
+				headers: { Authorization: `Bearer ${key}` },
+				throw: false,
+			});
+			return res.status >= 200 && res.status < 300;
+		} catch {
+			return false;
+		}
+	}
+
 	/**
 	 * Apply compile-time Cloudflare env → endpoints + live Foundry client.
-	 * No runtime switch; Key is never cleared by env changes.
+	 * Drops a Key that belongs to another env (dev=staging vs release=production).
 	 */
 	async applyCloudflareEnv(opts: { persist?: boolean; noticeOnSwitch?: boolean } = {}): Promise<CloudflareEnvResolved> {
 		const resolved = DEFAULT_CLOUDFLARE_ENV;
 		const endpoints = endpointsForEnv(resolved);
+		const keyEnv = this.settings.mdfKeyEnv;
+		const hadKey = !!this.settings.mdfKey;
 
 		this.settings.cloudflareEnv = resolved;
 		this.settings.cloudflareResolvedEnv = resolved;
@@ -1818,6 +1867,32 @@ export default class FridayPlugin extends Plugin {
 			apiBaseUrl: endpoints.apiBaseUrl,
 			publicBaseUrl: endpoints.publicBaseUrl,
 		});
+
+		if (hadKey) {
+			if (keyEnv && keyEnv !== resolved) {
+				this.clearMdfKey(`env ${keyEnv} → ${resolved}`);
+				if (opts.noticeOnSwitch !== false) {
+					new Notice(
+						`MDFriday Key was for ${keyEnv}; cleared for ${resolved}. Publish once to mint a new Guest Key.`,
+						6000,
+					);
+				}
+			} else if (!keyEnv) {
+				// Legacy installs: Key may be from production while this build is staging (or reverse).
+				const alive = await this.probeMdfKey(this.settings.mdfKey!, endpoints.apiBaseUrl);
+				if (alive) {
+					this.settings.mdfKeyEnv = resolved;
+				} else {
+					this.clearMdfKey('legacy key not on current API');
+					if (opts.noticeOnSwitch !== false) {
+						new Notice(
+							`MDFriday Key is not valid on ${resolved} (${endpoints.apiBaseUrl}). Cleared — publish once to mint a new Guest Key.`,
+							7000,
+						);
+					}
+				}
+			}
+		}
 
 		if (opts.persist !== false) {
 			await this.saveData(this.settings);

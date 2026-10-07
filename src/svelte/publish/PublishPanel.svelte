@@ -281,6 +281,9 @@
 		try {
 			const res = await mgr.listRemoteCloudflareProjects();
 			const vault = plugin.app.vault;
+			// API orders by updated_at DESC — keep first row per vault path so republish /
+			// legacy duplicate project rows don't show twice in the target menu.
+			const seenPaths = new Set<string>();
 			const next: TargetOption[] = [];
 			for (const p of res.projects || []) {
 				const sourcePath =
@@ -288,11 +291,13 @@
 						? p.sourcePath.replace(/\\/g, '/')
 						: null;
 				if (!sourcePath) continue;
+				if (seenPaths.has(sourcePath)) continue;
 				const abs = vault.getAbstractFileByPath(sourcePath);
 				if (!abs) continue;
 				const kind: 'note' | 'folder' =
 					abs instanceof TFolder || p.kind === 'folder' ? 'folder' : 'note';
 				if (kind === 'note' && !(abs instanceof TFile && abs.extension === 'md')) continue;
+				seenPaths.add(sourcePath);
 				const label = abs instanceof TFile ? abs.basename : abs.name;
 				next.push({
 					id: p.id,
@@ -942,119 +947,183 @@
 					</div>
 					{#if advancedOpen}
 						<div class="advanced-body">
-							<div class="field-group">
-								<div class="field-label">{t('ui.site_title')}</div>
-								<input
-									class="field-input"
-									type="text"
-									placeholder={t('ui.site_title_placeholder')}
-									value={siteName}
-									on:input={onTitleInput}
-								/>
-							</div>
-
-							<div class="field-group">
-								<div class="field-label">{t('ui.site_logo')}</div>
-								<div class="brand-picker">
-									<button
-										type="button"
-										class="brand-frame"
-										class:is-empty={!siteLogo}
-										aria-label={t('ui.site_logo')}
-										on:click={onPickLogo}
-									>
-										{#if logoPreview}
-											<img src={logoPreview} alt="" />
-										{:else}
-											<span class="brand-placeholder" aria-hidden="true"></span>
-										{/if}
-									</button>
-									{#if siteLogo}
-										<div class="brand-path">{siteLogo}</div>
-										<button type="button" class="brand-clear" on:click={onClearLogo}>{t('ui.brand_clear')}</button>
-									{/if}
+							<!-- 1. Basic information -->
+							<section class="adv-block">
+								<header class="adv-block-head">
+									<span class="adv-block-icon" aria-hidden="true">
+										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h7l3 3v13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M15 4v3h3"/><path d="M9 12h6M9 16h4"/></svg>
+									</span>
+									<div class="adv-block-text">
+										<div class="adv-block-title">{t('ui.adv_basic_title')}</div>
+										<div class="adv-block-desc">{t('ui.adv_basic_desc')}</div>
+									</div>
+								</header>
+								<div class="adv-block-body">
+									<label class="field-label" for="adv-site-title">{t('ui.site_title')}</label>
+									<div class="adv-title-row">
+										<input
+											id="adv-site-title"
+											class="field-input"
+											type="text"
+											placeholder={t('ui.site_title_placeholder')}
+											value={siteName}
+											on:input={onTitleInput}
+										/>
+										<span class="adv-char-count" aria-hidden="true">{siteName.length}/60</span>
+									</div>
 								</div>
-								<p class="helper">{t('ui.brand_helper')}</p>
-							</div>
+							</section>
 
-							<div class="field-group">
-								<div class="field-label">{t('ui.site_favicon')}</div>
-								<div class="brand-picker">
-									<button
-										type="button"
-										class="brand-frame"
-										class:is-empty={!siteFavicon}
-										aria-label={t('ui.site_favicon')}
-										on:click={onPickFavicon}
-									>
-										{#if faviconPreview}
-											<img src={faviconPreview} alt="" />
-										{:else}
-											<span class="brand-placeholder" aria-hidden="true"></span>
-										{/if}
-									</button>
-									{#if siteFavicon}
-										<div class="brand-path">{siteFavicon}</div>
-										<button type="button" class="brand-clear" on:click={onClearFavicon}>{t('ui.brand_clear')}</button>
-									{/if}
-								</div>
-							</div>
-
-							<div class="field-group">
-								<div class="field-label">{t('ui.nav_links')}</div>
-								<table class="nav-links-table">
-									<thead>
-										<tr>
-											<th>{t('ui.nav_links_title_col')}</th>
-											<th>{t('ui.nav_links_url_col')}</th>
-											<th aria-label={t('ui.nav_links_remove')}></th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each siteNavLinks as link, i (i)}
-											<tr>
-												<td>
-													<input
-														class="nav-links-input"
-														type="text"
-														placeholder={t('ui.nav_links_title_placeholder')}
-														value={link.title}
-														on:input={(e) =>
-															updateNavLink(i, 'title', (e.currentTarget as HTMLInputElement).value)}
-													/>
-												</td>
-												<td>
-													<input
-														class="nav-links-input"
-														type="text"
-														placeholder={t('ui.nav_links_url_placeholder')}
-														value={link.url}
-														on:input={(e) =>
-															updateNavLink(i, 'url', (e.currentTarget as HTMLInputElement).value)}
-													/>
-												</td>
-												<td class="nav-links-actions">
-													<button
-														type="button"
-														class="nav-links-remove"
-														on:click={() => removeNavLink(i)}
-													>
-														{t('ui.nav_links_remove')}
+							<!-- 2. Logo & Favicon -->
+							<section class="adv-block">
+								<header class="adv-block-head">
+									<span class="adv-block-icon" aria-hidden="true">
+										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.3" fill="currentColor" stroke="none"/><path d="M4 17l5-4 3 2.5L14.5 13 20 17.5"/></svg>
+									</span>
+									<div class="adv-block-text">
+										<div class="adv-block-title">{t('ui.adv_brand_title')}</div>
+										<div class="adv-block-desc">{t('ui.adv_brand_desc')}</div>
+									</div>
+								</header>
+								<div class="adv-block-body">
+									<div class="adv-brand-grid">
+										<div class="adv-brand-col">
+											<div class="field-label">{t('ui.site_logo')}</div>
+											<div class="adv-brand-row">
+												<button
+													type="button"
+													class="brand-frame"
+													class:is-empty={!siteLogo}
+													aria-label={t('ui.site_logo')}
+													on:click={onPickLogo}
+												>
+													{#if logoPreview}
+														<img src={logoPreview} alt="" />
+													{:else}
+														<span class="brand-placeholder" aria-hidden="true"></span>
+													{/if}
+												</button>
+												<div class="adv-brand-actions">
+													<button type="button" class="adv-upload-btn" on:click={onPickLogo}>
+														<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8 11V3M5 5.5 8 2.5 11 5.5"/><path d="M2.5 11v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2"/></svg>
+														{t('ui.adv_brand_upload')}
 													</button>
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-								<button type="button" class="nav-links-add" on:click={addNavLink}>
-									+ {t('ui.nav_links_add')}
-								</button>
-								<p class="helper">{t('ui.nav_links_helper')}</p>
-							</div>
+													<p class="helper adv-brand-hint">{t('ui.adv_logo_size_hint')}</p>
+													{#if siteLogo}
+														<div class="brand-path">{siteLogo}</div>
+														<button type="button" class="brand-clear" on:click={onClearLogo}>{t('ui.brand_clear')}</button>
+													{/if}
+												</div>
+											</div>
+										</div>
+										<div class="adv-brand-col">
+											<div class="field-label">{t('ui.site_favicon')}</div>
+											<div class="adv-brand-row">
+												<button
+													type="button"
+													class="brand-frame brand-frame--sm"
+													class:is-empty={!siteFavicon}
+													aria-label={t('ui.site_favicon')}
+													on:click={onPickFavicon}
+												>
+													{#if faviconPreview}
+														<img src={faviconPreview} alt="" />
+													{:else}
+														<span class="brand-placeholder" aria-hidden="true"></span>
+													{/if}
+												</button>
+												<div class="adv-brand-actions">
+													<button type="button" class="adv-upload-btn" on:click={onPickFavicon}>
+														<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8 11V3M5 5.5 8 2.5 11 5.5"/><path d="M2.5 11v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2"/></svg>
+														{t('ui.adv_brand_upload')}
+													</button>
+													<p class="helper adv-brand-hint">{t('ui.adv_favicon_size_hint')}</p>
+													{#if siteFavicon}
+														<div class="brand-path">{siteFavicon}</div>
+														<button type="button" class="brand-clear" on:click={onClearFavicon}>{t('ui.brand_clear')}</button>
+													{/if}
+												</div>
+											</div>
+										</div>
+									</div>
+									<p class="helper">{t('ui.brand_helper')}</p>
+								</div>
+							</section>
 
-							<div class="field-group">
-								<div class="toggle-row">
-									<span class="field-label" style="margin:0;">{t('ui.access_password')}</span>
+							<!-- 3. Navigation links -->
+							<section class="adv-block">
+								<header class="adv-block-head">
+									<span class="adv-block-icon" aria-hidden="true">
+										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0-7.07-7.07L10 5.93"/><path d="M14 11a5 5 0 0 0-7.07 0L5.5 12.43a5 5 0 0 0 7.07 7.07L14 18.07"/></svg>
+									</span>
+									<div class="adv-block-text">
+										<div class="adv-block-title">{t('ui.adv_nav_title')}</div>
+										<div class="adv-block-desc">{t('ui.adv_nav_desc')}</div>
+									</div>
+								</header>
+								<div class="adv-block-body">
+									<table class="nav-links-table">
+										<thead>
+											<tr>
+												<th>{t('ui.nav_links_title_col')}</th>
+												<th>{t('ui.nav_links_url_col')}</th>
+												<th aria-label={t('ui.nav_links_remove')}></th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each siteNavLinks as link, i (i)}
+												<tr>
+													<td>
+														<input
+															class="nav-links-input"
+															type="text"
+															placeholder={t('ui.nav_links_title_placeholder')}
+															value={link.title}
+															on:input={(e) =>
+																updateNavLink(i, 'title', (e.currentTarget as HTMLInputElement).value)}
+														/>
+													</td>
+													<td>
+														<input
+															class="nav-links-input"
+															type="text"
+															placeholder={t('ui.nav_links_url_placeholder')}
+															value={link.url}
+															on:input={(e) =>
+																updateNavLink(i, 'url', (e.currentTarget as HTMLInputElement).value)}
+														/>
+													</td>
+													<td class="nav-links-actions">
+														<button
+															type="button"
+															class="nav-links-remove"
+															aria-label={t('ui.nav_links_remove')}
+															title={t('ui.nav_links_remove')}
+															on:click={() => removeNavLink(i)}
+														>
+															<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 4.5h10M6 4.5V3.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1M6.5 7v5M9.5 7v5M4.5 4.5l.5 8a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1l.5-8"/></svg>
+														</button>
+													</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+									<button type="button" class="nav-links-add" on:click={addNavLink}>
+										+ {t('ui.nav_links_add')}
+									</button>
+								</div>
+							</section>
+
+							<!-- 4. Access password -->
+							<section class="adv-block">
+								<header class="adv-block-head">
+									<span class="adv-block-icon" aria-hidden="true">
+										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+									</span>
+									<div class="adv-block-text">
+										<div class="adv-block-title">{t('ui.adv_password_title')}</div>
+										<div class="adv-block-desc">{t('ui.adv_password_desc')}</div>
+									</div>
 									<div
 										class="toggle"
 										class:on={passwordOn}
@@ -1070,18 +1139,21 @@
 											}
 										}}
 									></div>
+								</header>
+								<div class="adv-block-body">
+									<input
+										class="field-input"
+										type="password"
+										placeholder={t('ui.adv_password_placeholder')}
+										value={sitePassword}
+										disabled={!passwordOn}
+										on:input={onPwdInput}
+									/>
+									<p class="helper">{t('ui.password_helper')}</p>
 								</div>
-								<input
-									class="field-input"
-									type="password"
-									placeholder={t('ui.site_password_placeholder')}
-									value={sitePassword}
-									disabled={!passwordOn}
-									on:input={onPwdInput}
-								/>
-								<p class="helper">{t('ui.password_helper')}</p>
-							</div>
+							</section>
 
+							<!-- 5. Subscribe -->
 							<SubscribeSection
 								{plugin}
 								{t}
@@ -1094,36 +1166,46 @@
 								sourcePath={activeVaultPath}
 								refreshKey={historyRefreshKey + accountEpoch * 1000}
 								onChange={onSubscribeChange}
-								onSignIn={() => void openClaimAccount()}
 							/>
 
-							<div class="field-group">
-								<div class="field-label">
-									{t('ui.custom_domain')}
-									{#if !isPersonal}
-										<span class="domain-status">{t('ui.domain_unbound')}</span>
+							<!-- 6. Custom domain -->
+							<section class="adv-block">
+								<header class="adv-block-head">
+									<span class="adv-block-icon" aria-hidden="true">
+										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+									</span>
+									<div class="adv-block-text">
+										<div class="adv-block-title">
+											{t('ui.adv_domain_title')}
+											{#if !isPersonal}
+												<span class="domain-status">{t('ui.domain_unbound')}</span>
+											{/if}
+										</div>
+										<div class="adv-block-desc">{t('ui.adv_domain_desc')}</div>
+									</div>
+								</header>
+								<div class="adv-block-body">
+									{#if isPersonal}
+										<div class="apple-domain-slot">
+											<DomainSection
+												{plugin}
+												{projectName}
+												onDomainActive={onDomainActive}
+												onDomainCleared={onDomainCleared}
+												layout="embedded"
+											/>
+										</div>
+									{:else}
+										<input
+											class="field-input"
+											type="text"
+											placeholder="notes.example.com"
+											disabled
+										/>
+										<p class="helper lock">{t('ui.domain_personal_only')}</p>
 									{/if}
 								</div>
-								{#if isPersonal}
-									<div class="apple-domain-slot">
-										<DomainSection
-											{plugin}
-											{projectName}
-											onDomainActive={onDomainActive}
-											onDomainCleared={onDomainCleared}
-											layout="embedded"
-										/>
-									</div>
-								{:else}
-									<input
-										class="field-input"
-										type="text"
-										placeholder="notes.example.com"
-										disabled
-									/>
-									<p class="helper lock">{t('ui.domain_personal_only')}</p>
-								{/if}
-							</div>
+							</section>
 						</div>
 					{/if}
 				</div>

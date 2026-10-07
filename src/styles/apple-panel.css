@@ -1383,14 +1383,189 @@
 }
 
 .workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .advanced-body {
-  display: block;
-  padding: 14px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 14px;
   border-top: 1px solid var(--apple-divider);
-  background: var(--apple-white);
+  background: #f5f5f7;
 }
 
 .workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .advanced-body .field-group:last-child {
   margin-bottom: 0;
+}
+
+/* Advanced ▸ per-feature cards (Basic / Brand / Nav / Password / Subscribe / Domain) */
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block {
+  margin: 0;
+  padding: 0;
+  background: var(--apple-white);
+  border: 1px solid var(--apple-divider);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 12px 0;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block-icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #f2f2f7;
+  color: #3a3a3c;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block-text {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block-title {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--apple-text);
+  line-height: 1.3;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block-desc {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--apple-secondary);
+  line-height: 1.35;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block-head .toggle {
+  margin-top: 2px;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block-body {
+  padding: 10px 12px 12px;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-title-row {
+  position: relative;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-title-row .field-input {
+  padding-right: 52px;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-char-count {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--apple-secondary);
+  pointer-events: none;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-brand-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 360px) {
+  .workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-brand-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-brand-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-brand-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-brand-hint {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .brand-frame--sm {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-upload-btn,
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 5px 10px;
+  min-height: 0;
+  height: auto;
+  border: 1px solid var(--apple-divider);
+  border-radius: 8px;
+  background: var(--apple-white);
+  color: var(--apple-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.2;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-upload-btn:hover,
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-secondary-btn:hover {
+  border-color: rgba(0, 113, 227, 0.35);
+  color: var(--apple-blue);
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-secondary-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block .brand-path {
+  text-align: left;
+  font-size: 10px;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block .apple-domain-slot {
+  margin: 0;
+}
+
+.workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .adv-block .embedded-status {
+  margin-bottom: 8px;
 }
 
 .workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .nav-links-table {
@@ -1444,22 +1619,27 @@
 
 .workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .nav-links-remove {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   border: none;
+  border-radius: 7px;
   background: transparent;
   color: var(--apple-secondary);
-  font-size: 11px;
-  font-weight: 500;
   font-family: inherit;
   padding: 0;
   margin: 0;
   cursor: pointer;
-  text-decoration: underline;
+  text-decoration: none;
   box-shadow: none;
   min-height: 0;
 }
 
 .workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .nav-links-remove:hover {
-  color: var(--apple-danger);
+  background: rgba(255, 59, 48, 0.1);
+  color: var(--apple-danger, #ff3b30);
 }
 
 .workspace-leaf-content[data-type="Friday_Service"] .mdf-apple-panel .nav-links-add {

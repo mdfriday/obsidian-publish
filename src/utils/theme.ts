@@ -2,31 +2,17 @@ import type FridayPlugin from '../main';
 import {themeApiService} from '../theme/themeApiService';
 import type {CatalogEntry} from '../theme/types';
 
+export {
+	FOLDER_WIKI_THEME_SLUGS,
+	filterThemesForSelection,
+	isFolderWikiTheme,
+} from './theme-selection';
+
 /** Default variant slugs — resolved against catalog at runtime. */
 export const DEFAULT_THEME_SLUGS = {
 	NOTE: 'paper',
 	QUARTZ: 'quartz',
 } as const;
-
-/** Folder publish lists wiki themes (kinds includes wiki). Quartz stays included if kinds are missing. */
-function isWikiTheme(theme: CatalogEntry): boolean {
-	if ((theme.kinds ?? []).some((kind) => kind.toLowerCase() === 'wiki')) return true;
-	const family = (theme.family || '').toLowerCase();
-	const slug = (theme.slug || '').toLowerCase();
-	return family === 'quartz' || slug === 'quartz';
-}
-
-/** Sidebar theme list: notes family for a single note; wiki themes for a folder. */
-export function filterThemesForSelection(
-	themes: CatalogEntry[],
-	kind: 'note' | 'folder',
-): CatalogEntry[] {
-	const withPack = themes.filter((t) => !!t.packUrl);
-	if (kind === 'folder') {
-		return withPack.filter(isWikiTheme);
-	}
-	return withPack.filter((t) => (t.family || '').toLowerCase() === 'notes');
-}
 
 /**
  * Themed builds always use Foundry's default MarkdownIt renderer.

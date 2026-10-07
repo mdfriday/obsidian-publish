@@ -125,9 +125,29 @@ function isEmptyJsonParseError(err: unknown): boolean {
 	return err instanceof Error && err.message.includes('Unexpected end of JSON input');
 }
 
+/** Electron requestUrl often dies mid-upload to R2; Node https is more reliable. */
+function isTransientNetworkError(err: unknown): boolean {
+	const msg = err instanceof Error ? err.message : String(err);
+	return /ERR_CONNECTION_RESET|ECONNRESET|EPIPE|ERR_CONNECTION_CLOSED|ERR_CONNECTION_ABORTED|ERR_NETWORK_CHANGED|ERR_FAILED|ETIMEDOUT|ECONNREFUSED|socket hang up|fetch failed|network/i.test(
+		msg,
+	);
+}
+
+function isR2StorageUrl(url: string): boolean {
+	try {
+		return /r2\.cloudflarestorage\.com$/i.test(new URL(url).hostname);
+	} catch {
+		return /r2\.cloudflarestorage\.com/i.test(url);
+	}
+}
+
 /**
  * Fallback for R2 PUT/DELETE/HEAD when requestUrl rejects empty JSON bodies.
  * Uses Node http/https (same pattern as ObsidianLLMHttpClient).
+ *
+ * Do NOT prefer this path for normal R2 uploads in Obsidian/Electron: concurrent
+ * `req.end(largeBody)` against a closed peer surfaces as uncaught `write EPIPE`
+ * (regression vs 26.9.x requestUrl-first). Keep requestUrl primary.
  */
 function nodeHttpRequest(
 	url: string,
@@ -146,6 +166,13 @@ function nodeHttpRequest(
 			reqHeaders['content-length'] = String(payload.byteLength);
 		}
 
+		let settled = false;
+		const settle = (fn: () => void) => {
+			if (settled) return;
+			settled = true;
+			fn();
+		};
+
 		const req = transport.request(
 			parsed,
 			{ method, headers: reqHeaders },
@@ -156,25 +183,37 @@ function nodeHttpRequest(
 					const text = Buffer.concat(chunks).toString('utf8');
 					const status = res.statusCode ?? 0;
 					const data = parseResponseData(text);
-					resolve({
-						status,
-						ok: status >= 200 && status < 300,
-						statusText: String(status),
-						data,
-						async text() {
-							return text;
-						},
-						async json() {
-							return data ?? null;
-						},
-					});
+					settle(() =>
+						resolve({
+							status,
+							ok: status >= 200 && status < 300,
+							statusText: String(status),
+							data,
+							async text() {
+								return text;
+							},
+							async json() {
+								return data ?? null;
+							},
+						}),
+					);
 				});
+				res.on('error', (err) => settle(() => reject(err)));
 			},
 		);
 
-		req.on('error', reject);
-		if (payload) req.end(payload);
-		else req.end();
+		// EPIPE / ECONNRESET after peer close — must not become Electron "Uncaught Error"
+		req.on('error', (err) => settle(() => reject(err)));
+		req.on('socket', (socket) => {
+			socket.on('error', (err) => settle(() => reject(err)));
+		});
+
+		try {
+			if (payload) req.end(payload);
+			else req.end();
+		} catch (err) {
+			settle(() => reject(err instanceof Error ? err : new Error(String(err))));
+		}
 	});
 }
 
@@ -184,17 +223,27 @@ async function requestUrlOrNode(
 ): Promise<PublishHttpResponse> {
 	const headers = withMdfridayClientHeader(rawParam.url, rawParam.headers);
 	const param: RequestUrlParam = headers ? { ...rawParam, headers } : rawParam;
+	const body = nodeBody ?? (param.body as ArrayBuffer | undefined);
+	const method = param.method ?? 'GET';
+
+	// Same strategy as released 26.9.x: Obsidian requestUrl first; Node only for
+	// empty-JSON parse quirks (and as a last resort on transient network errors).
 	try {
 		const response = await requestUrl({ ...param, throw: false });
 		return adaptObsidianResponse(response);
 	} catch (err) {
-		if (!isEmptyJsonParseError(err)) throw err;
-		return nodeHttpRequest(
-			param.url,
-			param.method ?? 'GET',
-			param.headers,
-			nodeBody ?? (param.body as ArrayBuffer | undefined),
-		);
+		if (isEmptyJsonParseError(err)) {
+			return nodeHttpRequest(param.url, method, param.headers, body);
+		}
+		if (isTransientNetworkError(err) && isR2StorageUrl(param.url)) {
+			try {
+				return await nodeHttpRequest(param.url, method, param.headers, body);
+			} catch (nodeErr) {
+				const msg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
+				throw new Error(`${err instanceof Error ? err.message : String(err)} (node fallback: ${msg})`);
+			}
+		}
+		throw err;
 	}
 }
 

@@ -471,6 +471,7 @@ export class ProjectServiceManager {
 		}
 
 		this.plugin.settings.mdfKey = key;
+		this.plugin.settings.mdfKeyEnv = this.plugin.settings.cloudflareResolvedEnv;
 		this.plugin.settings.mdfKeyKind = 'guest';
 		this.plugin.settings.mdfKeyPlan = 'guest';
 		if (typeof guest.contentExpiresAt === 'number') {

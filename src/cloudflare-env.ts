@@ -5,6 +5,9 @@
  * - `npm run dev` / watch → staging (fsky.top)
  * - `npm run build` (production) → production (mdfriday.com)
  * - Override: `MDF_CF_ENV=local|staging|production npm run …`
+ *
+ * Keys are tagged with `mdfKeyEnv` and cleared when the compile-time env no longer
+ * matches (a production Key cannot be claimed on staging and vice versa).
  */
 
 export type CloudflareEnvResolved = 'local' | 'staging' | 'production';

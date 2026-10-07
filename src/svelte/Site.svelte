@@ -906,6 +906,10 @@
 			);
 		const isStorage = /storage/i.test(raw);
 
+		const isNetwork =
+			code === 'network' ||
+			/ERR_CONNECTION_RESET|ECONNRESET|ERR_CONNECTION_CLOSED|socket hang up|network/i.test(raw);
+
 		if (isQuota) {
 			if (planLower === 'guest' || planLower === '' || !plugin.settings.mdfKeyPlan) {
 				publishError = isStorage
@@ -921,6 +925,9 @@
 				publishError = isStorage ? t('ui.err_quota_storage_personal') : raw;
 				publishErrorAction = null;
 			}
+		} else if (isNetwork) {
+			publishError = t('ui.err_network_publish');
+			publishErrorAction = null;
 		} else {
 			publishError = raw;
 			publishErrorAction = null;
