@@ -45,6 +45,7 @@
 		const looksError =
 			/\b(fail|error|invalid|expired|misconfig)/.test(st) ||
 			sslStatus.toLowerCase().includes('fail');
+		if ((domainStatus || '').toLowerCase() === 'paused') return 'paused' as const;
 		if (activeHostname) return 'active' as const;
 		if (domainId || step === 'dns' || step === 'ssl') {
 			return looksError ? ('error' as const) : ('pending' as const);
@@ -55,19 +56,21 @@
 		return 'not_configured' as const;
 	})();
 	$: summaryLine =
-		domainStatusKey === 'active'
-			? activeHostname || t('ui.domain_status_active')
-			: domainStatusKey === 'pending'
-				? t('ui.domain_status_pending')
-				: domainStatusKey === 'error'
-					? t('ui.domain_status_error')
-					: domainStatusKey === 'need_auth'
-						? t('ui.domain_status_need_auth')
-						: domainStatusKey === 'publish_first'
-							? t('ui.domain_status_publish_first')
-							: domainStatusKey === 'upgrade'
-								? t('ui.domain_status_upgrade')
-								: t('ui.domain_status_not_configured');
+		domainStatusKey === 'paused'
+			? t('ui.domain_status_paused')
+			: domainStatusKey === 'active'
+				? activeHostname || t('ui.domain_status_active')
+				: domainStatusKey === 'pending'
+					? t('ui.domain_status_pending')
+					: domainStatusKey === 'error'
+						? t('ui.domain_status_error')
+						: domainStatusKey === 'need_auth'
+							? t('ui.domain_status_need_auth')
+							: domainStatusKey === 'publish_first'
+								? t('ui.domain_status_publish_first')
+								: domainStatusKey === 'upgrade'
+									? t('ui.domain_status_upgrade')
+									: t('ui.domain_status_not_configured');
 	$: domainTitle = t('ui.custom_domain');
 
 	$: if (layout === 'embedded' && !expanded) {
@@ -162,7 +165,11 @@
 				return st !== 'removed' && st !== 'unbound';
 			});
 			const active = domains.find((d) => (d.status || '').toLowerCase() === 'active');
-			const pending = domains.find((d) => (d.status || '').toLowerCase() !== 'active');
+			const paused = domains.find((d) => (d.status || '').toLowerCase() === 'paused');
+			const pending = domains.find((d) => {
+				const st = (d.status || '').toLowerCase();
+				return st !== 'active' && st !== 'paused';
+			});
 			if (active?.hostname) {
 				activeHostname = active.hostname;
 				domainId = active.id;
@@ -170,6 +177,14 @@
 				certStatus = active.certStatus || 'active';
 				step = 'done';
 				hostnameInput = active.hostname;
+			} else if (paused?.hostname) {
+				activeHostname = null;
+				domainId = paused.id;
+				hostnameInput = paused.hostname;
+				domainStatus = 'paused';
+				certStatus = paused.certStatus || '';
+				step = 'done';
+				setStatus(t('ui.domain_status_paused'), false);
 			} else if (pending) {
 				activeHostname = null;
 				domainId = pending.id;

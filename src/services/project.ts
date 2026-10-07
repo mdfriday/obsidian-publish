@@ -640,7 +640,7 @@ export class ProjectServiceManager {
 				code: 'quota_exceeded',
 				error:
 					plan === 'guest'
-						? 'Guest allows only 1 site — limit reached. Sign up free for unlimited sites and 50 MB permanent storage.'
+						? 'Guest allows 1 site — limit reached. Sign up free for unlimited sites and 200 MB permanent storage.'
 						: `Site limit reached (${used}/${effectiveMax}).`,
 			};
 		}

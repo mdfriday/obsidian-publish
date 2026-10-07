@@ -2224,7 +2224,7 @@
 		}
 	}
 
-	/** Take down live site via Control Plane unpublish (share → R2 delete → 404). */
+	/** Take down live site via Control Plane unpublish (custom domain → 410 offline page; share link → R2 live files deleted → 404). */
 	async function revokeShare() {
 		const ok = confirm(t('ui.revoke_share_confirm'));
 		if (!ok) return;
