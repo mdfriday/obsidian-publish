@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-publish",
-	"version": "26.10.1",
+	"version": "26.10.2",
 	"description": "MDFriday Publish — turn notes and folders into shareable websites via Cloudflare. Desktop.",
 	"main": "main.js",
 	"type": "module",
