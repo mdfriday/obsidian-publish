@@ -92,6 +92,12 @@ interface FridaySettings {
 	/** Unified MDF_… Key (guest or user). Kind is not encoded in the string. */
 	mdfKey: string | null;
 	/**
+	 * Stable id for this Obsidian vault (workspace). Paired with note/folder sourcePath
+	 * on remote projects so the same account can publish identical relative paths from
+	 * different vaults / machines without colliding. Editable in Settings.
+	 */
+	workspaceId: string | null;
+	/**
 	 * Which Cloudflare env minted / last validated this Key.
 	 * Cleared when compile-time env (dev=staging vs build=production) no longer matches —
 	 * otherwise claim on fsky.top 404s with a production Key (and vice versa).
@@ -139,6 +145,7 @@ interface FridaySettings {
 const DEFAULT_SETTINGS: FridaySettings = {
 	downloadServer: 'global',
 	mdfKey: null,
+	workspaceId: null,
 	mdfKeyEnv: null,
 	mdfKeyKind: null,
 	mdfKeyPlan: null,
@@ -1801,6 +1808,28 @@ export default class FridayPlugin extends Plugin {
 			this.settings.cloudflareGuestToken = null;
 			await this.saveData(this.settings);
 		}
+		// Ensure every vault has a stable workspace id (syncs with this vault's data.json).
+		if (!this.settings.workspaceId || !String(this.settings.workspaceId).trim()) {
+			this.settings.workspaceId = this.generateWorkspaceId();
+			await this.saveData(this.settings);
+		}
+	}
+
+	/** New UUID for this vault — also used when the user regenerates in Settings. */
+	generateWorkspaceId(): string {
+		if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+			return crypto.randomUUID();
+		}
+		return `ws_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+	}
+
+	/** Current vault workspace id (never empty after loadSettings). */
+	getWorkspaceId(): string {
+		const id = (this.settings.workspaceId || '').trim();
+		if (id) return id;
+		const next = this.generateWorkspaceId();
+		this.settings.workspaceId = next;
+		return next;
 	}
 
 	/** Drop Key + account cache (env mismatch or revoked Key). */

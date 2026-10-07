@@ -704,6 +704,7 @@ export class ProjectServiceManager {
 			hostingMode: 'share',
 			apiBaseUrl: this.plugin.settings.cloudflareApiBaseUrl,
 			publicBaseUrl,
+			workspaceId: this.plugin.getWorkspaceId(),
 			...(identity.sourcePath ? { sourcePath: identity.sourcePath } : {}),
 			...(identity.kind ? { kind: identity.kind } : {}),
 			...(identity.title ? { title: identity.title } : {}),
@@ -794,6 +795,7 @@ export class ProjectServiceManager {
 			domainStatus?: string;
 			domainCertStatus?: string;
 			sourcePath?: string | null;
+			workspaceId?: string | null;
 			publicUrl?: string;
 		}>;
 		error?: string;
@@ -838,6 +840,7 @@ export class ProjectServiceManager {
 					| string
 					| undefined;
 				const sourcePath = (p.sourcePath ?? p.source_path) as string | null | undefined;
+				const workspaceId = (p.workspaceId ?? p.workspace_id) as string | null | undefined;
 				const publicUrl = (p.publicUrl ?? p.public_url) as string | undefined;
 				return {
 					id: String(p.id || ''),
@@ -853,6 +856,7 @@ export class ProjectServiceManager {
 					...(domainStatus ? { domainStatus } : {}),
 					...(domainCertStatus ? { domainCertStatus } : {}),
 					...(sourcePath !== undefined ? { sourcePath: sourcePath } : {}),
+					...(workspaceId !== undefined ? { workspaceId } : {}),
 					...(typeof publicUrl === 'string' ? { publicUrl } : {}),
 				};
 			});
@@ -1170,6 +1174,7 @@ export class ProjectServiceManager {
 			config?: unknown;
 			hostingMode?: 'share' | 'custom';
 			sourcePath?: string;
+			workspaceId?: string;
 			kind?: 'note' | 'folder';
 			title?: string;
 			/** Recorded on the release: as-is (Obsidian renderer) vs themed (Foundry SSG). */
@@ -1221,6 +1226,7 @@ export class ProjectServiceManager {
 					// Custom: empty release prefix needs full tree until server copyFrom exists.
 					// Share after unpublish: LIVE prefix is empty — incremental would skip index.html.
 					force: forceFull,
+					workspaceId: options.workspaceId || this.plugin.getWorkspaceId(),
 					...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
 					...(options.kind ? { kind: options.kind } : {}),
 					...(options.title ? { title: options.title } : {}),

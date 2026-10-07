@@ -118,12 +118,13 @@
 	type PanelTab = 'publish' | 'history';
 	type PlanTier = 'guest' | 'free' | 'personal';
 
-	type TargetOption = {
+		type TargetOption = {
 		id: string;
 		sourcePath: string;
 		label: string;
 		kind: 'note' | 'folder';
 		status?: string;
+		workspaceId?: string | null;
 	};
 
 	let activeTab: PanelTab = 'publish';
@@ -281,9 +282,7 @@
 		try {
 			const res = await mgr.listRemoteCloudflareProjects();
 			const vault = plugin.app.vault;
-			// API orders by updated_at DESC — keep first row per vault path so republish /
-			// legacy duplicate project rows don't show twice in the target menu.
-			const seenPaths = new Set<string>();
+			const workspaceId = plugin.getWorkspaceId();
 			const next: TargetOption[] = [];
 			for (const p of res.projects || []) {
 				const sourcePath =
@@ -291,19 +290,24 @@
 						? p.sourcePath.replace(/\\/g, '/')
 						: null;
 				if (!sourcePath) continue;
-				if (seenPaths.has(sourcePath)) continue;
+				// Only this vault's projects (legacy null workspaceId still shown until claimed).
+				const rowWs =
+					typeof p.workspaceId === 'string' && p.workspaceId.trim()
+						? p.workspaceId.trim()
+						: null;
+				if (rowWs && rowWs !== workspaceId) continue;
 				const abs = vault.getAbstractFileByPath(sourcePath);
 				if (!abs) continue;
 				const kind: 'note' | 'folder' =
 					abs instanceof TFolder || p.kind === 'folder' ? 'folder' : 'note';
 				if (kind === 'note' && !(abs instanceof TFile && abs.extension === 'md')) continue;
-				seenPaths.add(sourcePath);
 				const label = abs instanceof TFile ? abs.basename : abs.name;
 				next.push({
 					id: p.id,
 					sourcePath,
 					label,
 					kind,
+					workspaceId: rowWs,
 					...(typeof p.status === 'string' ? { status: p.status } : {}),
 				});
 			}

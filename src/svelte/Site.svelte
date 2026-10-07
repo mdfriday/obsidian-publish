@@ -1665,12 +1665,17 @@
 				return;
 			}
 
-			const match = res.projects.find(
-				(p) =>
-					pathsEqual(p.sourcePath, path) &&
-					p.status !== 'deleted' &&
-					p.status !== 'draft',
-			);
+			const workspaceId = plugin.getWorkspaceId();
+			const match = res.projects.find((p) => {
+				if (!pathsEqual(p.sourcePath, path)) return false;
+				if (p.status === 'deleted' || p.status === 'draft') return false;
+				const rowWs =
+					typeof p.workspaceId === 'string' && p.workspaceId.trim()
+						? p.workspaceId.trim()
+						: null;
+				// Prefer exact workspace match; allow legacy null until first republish claims it.
+				return !rowWs || rowWs === workspaceId;
+			});
 
 			if (!match) {
 				if (plugin.currentProjectName) {
@@ -2275,22 +2280,30 @@
 				}
 			}
 
-			// Fallback: resolve remote project by vault sourcePath (UI may already show live URL).
+			// Fallback: resolve remote project by (workspaceId, sourcePath).
 			if (!projectId && mgr) {
 				const vaultPath =
 					activeVaultPath ||
 					selectionVaultPath(site.getCurrentContents()) ||
 					null;
 				const listed = await mgr.listRemoteCloudflareProjects();
+				const workspaceId = plugin.getWorkspaceId();
 				if (listed.success && listed.projects?.length && vaultPath) {
-					const match = listed.projects.find(
-						(p) =>
-							pathsEqual(p.sourcePath, vaultPath) &&
-							p.status !== 'deleted' &&
-							p.status !== 'draft' &&
-							p.status !== 'unpublished' &&
-							!!p.id,
-					);
+					const match = listed.projects.find((p) => {
+						if (!pathsEqual(p.sourcePath, vaultPath) || !p.id) return false;
+						if (
+							p.status === 'deleted' ||
+							p.status === 'draft' ||
+							p.status === 'unpublished'
+						) {
+							return false;
+						}
+						const rowWs =
+							typeof p.workspaceId === 'string' && p.workspaceId.trim()
+								? p.workspaceId.trim()
+								: null;
+						return !rowWs || rowWs === workspaceId;
+					});
 					if (match?.id) {
 						projectId = match.id;
 					}
