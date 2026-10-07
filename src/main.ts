@@ -1833,9 +1833,8 @@ export default class FridayPlugin extends Plugin {
 	}
 
 	/** Drop Key + account cache (env mismatch or revoked Key). */
-	clearMdfKey(reason?: string): void {
+	clearMdfKey(_reason?: string): void {
 		if (!this.settings.mdfKey && !this.settings.mdfKeyEnv) return;
-		console.info('[Friday] Clearing MDF Key', reason || '');
 		this.settings.mdfKey = null;
 		this.settings.mdfKeyEnv = null;
 		this.settings.mdfKeyKind = null;
@@ -1878,7 +1877,7 @@ export default class FridayPlugin extends Plugin {
 		const resolved = DEFAULT_CLOUDFLARE_ENV;
 		const endpoints = endpointsForEnv(resolved);
 		const keyEnv = this.settings.mdfKeyEnv;
-		const hadKey = !!this.settings.mdfKey;
+		const existingKey = this.settings.mdfKey;
 
 		this.settings.cloudflareEnv = resolved;
 		this.settings.cloudflareResolvedEnv = resolved;
@@ -1897,7 +1896,7 @@ export default class FridayPlugin extends Plugin {
 			publicBaseUrl: endpoints.publicBaseUrl,
 		});
 
-		if (hadKey) {
+		if (existingKey) {
 			if (keyEnv && keyEnv !== resolved) {
 				this.clearMdfKey(`env ${keyEnv} → ${resolved}`);
 				if (opts.noticeOnSwitch !== false) {
@@ -1908,7 +1907,7 @@ export default class FridayPlugin extends Plugin {
 				}
 			} else if (!keyEnv) {
 				// Legacy installs: Key may be from production while this build is staging (or reverse).
-				const alive = await this.probeMdfKey(this.settings.mdfKey!, endpoints.apiBaseUrl);
+				const alive = await this.probeMdfKey(existingKey, endpoints.apiBaseUrl);
 				if (alive) {
 					this.settings.mdfKeyEnv = resolved;
 				} else {
