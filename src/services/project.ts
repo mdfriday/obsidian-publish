@@ -27,13 +27,22 @@ import { brandPathsFromParams } from '../branding/brand-path';
 import { syncSubscribeOnPublish } from '../subscribe/subscribe-service';
 import { stageBrandAssets } from '../branding/stage-brand-assets';
 
-/** Share mode baseURL per arch/03-build-contract.md */
-export function computeShareBaseUrl(publicBaseUrl: string, siteId: string): string {
-	const base = (publicBaseUrl || CLOUDFLARE_ENV_PRESETS.staging.publicBaseUrl).replace(
-		/\/$/,
-		'',
-	);
-	return `${base}/s/${siteId}/`;
+/** Share mode path prefix. Host stays on canonicalHost. arch/03 §3 */
+export function computeShareBaseUrl(_publicBaseUrl: string, siteId: string): string {
+	return `/s/${siteId}/`;
+}
+
+/** Origin only, no path. Empty when the public base is not a URL. */
+export function computeCanonicalHost(publicBaseUrl: string): string {
+	const raw = (publicBaseUrl || '').trim();
+	if (!raw || raw.startsWith('/')) return '';
+	try {
+		const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
+		if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+		return `${url.protocol}//${url.host}`;
+	} catch {
+		return '';
+	}
 }
 
 /**
@@ -627,21 +636,14 @@ export class ProjectServiceManager {
 		const used = this.plugin.settings.mdfProjectCount ?? 0;
 		const max = this.plugin.settings.mdfQuotaMaxProjects;
 		const plan = (this.plugin.settings.mdfKeyPlan || 'guest').toLowerCase();
-		const effectiveMax =
-			max === null
-				? null
-				: typeof max === 'number'
-					? max
-					: plan === 'guest'
-						? 1
-						: null; // free/personal/pro: unlimited when quota unset
+		const effectiveMax = max === null ? null : typeof max === 'number' ? max : null;
 		if (effectiveMax != null && used >= effectiveMax) {
 			return {
 				ok: false,
 				code: 'quota_exceeded',
 				error:
 					plan === 'guest'
-						? 'Guest allows 1 site — limit reached. Sign up free for unlimited sites and 200 MB permanent storage.'
+						? 'Site limit reached. Sign up free for 200 MB permanent storage.'
 						: `Site limit reached (${used}/${effectiveMax}).`,
 			};
 		}
@@ -725,7 +727,8 @@ export class ProjectServiceManager {
 			binding.siteId != null
 				? computeShareBaseUrl(publicBaseUrl, binding.siteId)
 				: '';
-		let publicUrl = baseURL ? `${baseURL.replace(/\/$/, '')}/index.html` : '';
+		let canonicalHost = computeCanonicalHost(publicBaseUrl);
+		let publicUrl = canonicalHost && baseURL ? `${canonicalHost}${baseURL}index.html` : '';
 
 		// Prefer live domain state over local binding (activation may have flipped remote only)
 		if (binding.cloudflareProjectId) {
@@ -737,6 +740,7 @@ export class ProjectServiceManager {
 				hostingMode = 'custom';
 				baseURL = computeCustomBaseUrl(active.hostname);
 				publicUrl = computeCustomPublicUrl(active.hostname);
+				canonicalHost = computeCanonicalHost(publicUrl);
 				if (binding.hostingMode !== 'custom') {
 					await foundry.markBindingCustom({
 						workspacePath: this.plugin.absWorkspacePath,
@@ -748,7 +752,8 @@ export class ProjectServiceManager {
 				// Remote says custom but no active domain — fall back to share paths
 				hostingMode = 'share';
 				baseURL = computeShareBaseUrl(publicBaseUrl, binding.siteId);
-				publicUrl = `${baseURL.replace(/\/$/, '')}/index.html`;
+				canonicalHost = computeCanonicalHost(publicBaseUrl);
+				publicUrl = canonicalHost ? `${canonicalHost}${baseURL}index.html` : '';
 			}
 		}
 
@@ -759,6 +764,10 @@ export class ProjectServiceManager {
 		const saved = await this.saveConfig(projectName, 'baseURL', baseURL);
 		if (!saved) {
 			console.warn('[ProjectServiceManager] Failed to persist baseURL');
+		}
+		const savedHost = await this.saveConfig(projectName, 'canonicalHost', canonicalHost);
+		if (!savedHost) {
+			console.warn('[ProjectServiceManager] Failed to persist canonicalHost');
 		}
 
 		// Subscribe capability: stamp project id + endpoint into params.subscribe, PATCH the server flag on change.

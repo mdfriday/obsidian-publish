@@ -34,11 +34,11 @@ Plan: **pill in header** → Apple-style tier cards popover (not a third tab). F
 
 | Tier | Best for | Highlights | CTA |
 |------|----------|------------|-----|
-| **Guest** | First try | No account · unlimited sites/builds/exports · **5 MB** · CDN · Note/Wiki · clears next **UTC 00:00** · first Turnstile on mdfriday.com | Install plugin |
-| **Free** | Ongoing free publishing | Everything in Guest + **50 MB permanent** · unlimited sites · claim Guest same URL · account manage · soft-archive after long inactivity | Sign up free (`https://mdfriday.com/account/`) |
-| **Personal** ($5/mo) | Your domain & lasting sites | Everything in Free + **1 GB** · **3 custom domains + HTTPS** · **release history & rollback** | Upgrade to Personal |
+| **Guest** | Try one note | No account · **unlimited sites** · builds/exports unlimited · **5 MB** (enough to try one note) · CDN · Note/Wiki · clears next **UTC 00:00** · first Turnstile on mdfriday.com | Install plugin |
+| **Free** | Ongoing free publishing | Everything in Guest + **200 MB permanent** · unlimited sites · claim Guest same URL · account manage · soft-archive after long inactivity | Sign up free (`https://mdfriday.com/account/`) |
+| **Personal** | Your domain & lasting sites | Everything in Free + **5 GB** · **1 custom domain** ($5/month or $50/year; **3 domains** on $60/year) + HTTPS · **release history & rollback** | Upgrade to Personal |
 
-Gates: custom domain + history/rollback = **Personal only**. Soft banners state storage/retention. Password stays Personal-aligned advanced.
+Gates: custom domain + history/rollback = **Personal only**. Soft banners state storage/retention. Access password is on every plan.
 
 ## Product highlights (encoded in prototype)
 

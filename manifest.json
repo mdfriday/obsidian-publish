@@ -2,7 +2,7 @@
 	"id": "mdfriday-publish",
 	"name": "MDFriday Publish",
 	"minAppVersion": "1.13.0",
-	"description": "Turn notes into shareable websites. One-click Cloudflare publish — guest session created automatically, no license or email required.",
+	"description": "Right-click a folder in Obsidian. See your website. No account, no Git.",
 	"author": "sunwei",
 	"authorUrl": "https://mdfriday.com",
 	"isDesktopOnly": true,
