@@ -168,7 +168,7 @@ This is where MDFriday moves beyond a traditional SSG.
 | Encrypted Sharing         | 🟢 Available | Protect shared content                                                            |
 | SEO Capabilities          | 🟢 Available | Sitemap, robots.txt, Meta Description, Open Graph, Canonical URL, Structured Data |
 | Nav Links Configuration   | 🔵 Building  | Site navigation                                                                   |
-| Obsidian Base supporting  | ⚪ Coming   | Support Base file type                                                            |
+| Obsidian Base supporting  | 🟢 Available | `.base` files, embeds, and fenced `base` blocks render in theme mode              |
 | Landing Page              | ⚪ Coming     | New site type                                                                     |
 | Blog                      | ⚪ Coming     | New site type                                                                     |
 | SaaS                      | ⚪ Coming     | New site type                                                                     |
@@ -184,4 +184,4 @@ This is where MDFriday moves beyond a traditional SSG.
 
 ---
 
-*Last updated: September 2026*
+*Last updated: October 2026*
