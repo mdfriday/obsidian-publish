@@ -924,13 +924,13 @@ export class ProjectServiceManager {
 			}
 		}
 
-		const publishResult = await this.publish(projectName, {
+		const publishResult = await this.publishOrRebuild(projectName, {
 			method: 'cloudflare',
 			hostingMode: ensured.hostingMode,
 			releaseMode: skipBuild ? 'as-is' : 'themed',
 			onProgress: (progress) => onProgress?.(progress),
 			...this.publishIdentityFromSelection(),
-		});
+		}, { skipBuild });
 
 		if (!publishResult.success) {
 			return publishResult;
@@ -1054,7 +1054,7 @@ export class ProjectServiceManager {
 				let cloudflarePublishUrl: string | undefined;
 
 				if (useCloudflare) {
-					const publishResult = await this.publish(projectName, {
+					const publishResult = await this.publishOrRebuild(projectName, {
 						method: 'cloudflare',
 						config: publishConfig?.config,
 						releaseMode: 'themed',
@@ -1220,7 +1220,6 @@ export class ProjectServiceManager {
 			const hostingMode = options.hostingMode ?? 'share';
 			const forceFull =
 				options.force === true ||
-				hostingMode === 'custom' ||
 				(await this.remoteNeedsFullUpload(projectName));
 
 			const result = await foundry.publishCloudflare(
@@ -1232,8 +1231,7 @@ export class ProjectServiceManager {
 					apiBaseUrl: this.plugin.settings.cloudflareApiBaseUrl,
 					publicBaseUrl: this.plugin.settings.cloudflarePublicBaseUrl,
 					hostingMode,
-					// Custom: empty release prefix needs full tree until server copyFrom exists.
-					// Share after unpublish: LIVE prefix is empty — incremental would skip index.html.
+					// Unpublished or draft remote trees are empty, so the next publish uploads every file.
 					force: forceFull,
 					workspaceId: options.workspaceId || this.plugin.getWorkspaceId(),
 					...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
@@ -1260,6 +1258,43 @@ export class ProjectServiceManager {
 				error: (error as Error).message,
 			};
 		}
+	}
+
+	/**
+	 * One incremental publish. If the previous snapshot cannot fill the new release,
+	 * rebuild once (unless public/ was supplied by a faithful package) and upload the full tree.
+	 */
+	private async publishOrRebuild(
+		projectName: string,
+		options: {
+			method?: string;
+			config?: unknown;
+			hostingMode?: 'share' | 'custom';
+			sourcePath?: string;
+			workspaceId?: string;
+			kind?: 'note' | 'folder';
+			title?: string;
+			releaseMode?: 'as-is' | 'themed';
+			force?: boolean;
+			onProgress?: (progress: PublishProgressUpdate) => void;
+		},
+		rebuild: { skipBuild?: boolean } = {},
+	): Promise<PublishResult> {
+		const first = await this.publish(projectName, options);
+		if (first.success || first.code !== 'snapshot_incomplete' || options.force) return first;
+
+		options.onProgress?.({
+			phase: 'scanning',
+			percentage: 0,
+			message: 'Rebuilding the full site…',
+		});
+		if (!rebuild.skipBuild) {
+			const built = await this.build(projectName);
+			if (!built.success) {
+				return { success: false, error: built.error || 'Build failed' };
+			}
+		}
+		return this.publish(projectName, { ...options, force: true });
 	}
 
 	/** Vault path + kind for remote project identity (source_path). */
