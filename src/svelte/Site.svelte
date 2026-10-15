@@ -1315,6 +1315,8 @@
 		const picked = await pickVaultImage(plugin.app, {
 			title: which === 'logo' ? t('ui.site_logo') : t('ui.site_favicon'),
 			empty: t('ui.brand_pick_empty'),
+			placeholder: t('ui.brand_pick_placeholder'),
+			noMatch: t('ui.brand_pick_no_match'),
 		});
 		if (!picked) return;
 		if (!userBrandPath(picked)) {
