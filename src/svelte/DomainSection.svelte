@@ -2,6 +2,8 @@
 	import { Notice } from 'obsidian';
 	import { onMount } from 'svelte';
 	import type FridayPlugin from '../main';
+	import { dnsShortHost } from '../services/dns-host';
+	import { oldestFirst } from '../services/domain-order';
 
 	export let plugin: FridayPlugin;
 	export let projectName: string;
@@ -13,6 +15,13 @@
 	export let layout: 'fold' | 'embedded' = 'fold';
 
 	type DomainStep = 'idle' | 'hostname' | 'dns' | 'ssl' | 'done';
+	type ListedDomain = {
+		id: string;
+		hostname: string;
+		status: string;
+		certStatus: string;
+		ownershipToken?: string;
+	};
 
 	let expanded = layout === 'embedded';
 	let loading = false;
@@ -23,6 +32,8 @@
 	let remoteProjectId: string | null = null;
 	let hostnameInput = '';
 	let domainId: string | null = null;
+	let attached: ListedDomain[] = [];
+	/** Oldest active hostname. Publish success shows this one. */
 	let activeHostname: string | null = null;
 	let domainStatus = '';
 	let certStatus = '';
@@ -33,11 +44,19 @@
 	let dcvCnames: Array<{ cname: string; cnameTarget: string }> = [];
 	let sslStatus = '';
 	let showHostAdvanced = false;
+	let activationDepth = 0;
 
 	$: canDomain =
 		(plugin.settings.mdfQuotaFeatures || []).includes('custom_domain') ||
 		['personal', 'pro'].includes((plugin.settings.mdfKeyPlan || '').toLowerCase());
 
+	$: domainLimit = plugin.settings.mdfQuotaMaxCustomDomains;
+	$: canAddMore =
+		canDomain && (typeof domainLimit !== 'number' || attached.length < domainLimit);
+	$: boundRows = attached.filter((d) => {
+		const st = d.status.toLowerCase();
+		return st === 'active' || st === 'paused';
+	});
 	$: t = plugin.i18n?.t || ((key: string) => key);
 	$: hasKey = !!plugin.settings.mdfKey;
 	$: domainStatusKey = (() => {
@@ -89,6 +108,7 @@
 		} else {
 			remoteProjectId = null;
 			activeHostname = null;
+			attached = [];
 			domainId = null;
 			hostnameInput = '';
 			domainStatus = '';
@@ -145,6 +165,7 @@
 			});
 			if (!bind.success || !bind.cloudflareProjectId) {
 				remoteProjectId = null;
+				attached = [];
 				activeHostname = null;
 				step = 'idle';
 				return;
@@ -160,47 +181,53 @@
 				setStatus(res.error || 'Failed to load domains', true);
 				return;
 			}
-			const domains = (res.domains || []).filter((d) => {
-				const st = (d.status || '').toLowerCase();
-				return st !== 'removed' && st !== 'unbound';
-			});
-			const active = domains.find((d) => (d.status || '').toLowerCase() === 'active');
-			const paused = domains.find((d) => (d.status || '').toLowerCase() === 'paused');
-			const pending = domains.find((d) => {
-				const st = (d.status || '').toLowerCase();
+			const listed = oldestFirst(
+				(res.domains || []).filter((d) => {
+					const st = (d.status || '').toLowerCase();
+					return st !== 'removed' && st !== 'unbound' && !!d.id && !!d.hostname;
+				}),
+			).map((d) => ({
+				id: d.id,
+				hostname: d.hostname,
+				status: d.status || '',
+				certStatus: d.certStatus || '',
+				...(d.ownershipToken ? { ownershipToken: d.ownershipToken } : {}),
+			}));
+			attached = listed;
+			cnameTarget = res.cnameTarget || cnameTarget;
+			const primary =
+				listed.find((d) => d.status.toLowerCase() === 'active' && d.hostname) ??
+				listed.find((d) => d.certStatus.toLowerCase() === 'active' && d.hostname);
+			activeHostname = primary?.hostname || null;
+			const pending = listed.find((d) => {
+				const st = d.status.toLowerCase();
 				return st !== 'active' && st !== 'paused';
 			});
-			if (active?.hostname) {
-				activeHostname = active.hostname;
-				domainId = active.id;
-				domainStatus = active.status || 'active';
-				certStatus = active.certStatus || 'active';
-				step = 'done';
-				hostnameInput = active.hostname;
-			} else if (paused?.hostname) {
-				activeHostname = null;
-				domainId = paused.id;
-				hostnameInput = paused.hostname;
-				domainStatus = 'paused';
-				certStatus = paused.certStatus || '';
-				step = 'done';
-				setStatus(t('ui.domain_status_paused'), false);
-			} else if (pending) {
-				activeHostname = null;
+			if (pending) {
 				domainId = pending.id;
 				hostnameInput = pending.hostname;
 				domainStatus = pending.status || 'pending';
 				certStatus = pending.certStatus || '';
-				cnameTarget = res.cnameTarget || '';
 				if (pending.ownershipToken) {
 					txtValue = pending.ownershipToken;
 					txtName = `_mdfriday-verify.${pending.hostname}`;
 				}
-				const st = (pending.status || '').toLowerCase();
+				const st = pending.status.toLowerCase();
 				step = st === 'pending' || st === 'verifying' || !st ? 'dns' : 'ssl';
-				if (step === 'ssl') {
+				if (step === 'ssl' && activationDepth === 0) {
 					await pollCert(false);
 				}
+			} else if (listed.length) {
+				domainId = null;
+				hostnameInput = '';
+				domainStatus = primary ? 'active' : 'paused';
+				certStatus = primary?.certStatus || '';
+				txtName = '';
+				txtValue = '';
+				sslTxts = [];
+				dcvCnames = [];
+				step = 'done';
+				if (!primary) setStatus(t('ui.domain_status_paused'), false);
 			} else {
 				resetLocalDomainState(canDomain ? 'hostname' : 'idle');
 			}
@@ -209,12 +236,8 @@
 		}
 	}
 
-	/** Registrar host column: strip apex (assumes 2-label TLD like example.com). */
 	function relativeHost(fqdn: string): string {
-		const host = fqdn.replace(/\.$/, '').toLowerCase();
-		const parts = host.split('.').filter(Boolean);
-		if (parts.length >= 3) return parts.slice(0, -2).join('.');
-		return host;
+		return dnsShortHost(fqdn);
 	}
 
 	async function copyText(value: string) {
@@ -358,24 +381,54 @@
 	}
 
 	async function onActivated() {
-		const foundry = plugin.foundryPublishService;
-		if (foundry && projectName) {
-			await foundry.markBindingCustom({
-				workspacePath: plugin.absWorkspacePath,
-				projectName,
-				hostname: hostnameInput,
-			});
+		if (activationDepth > 0) return;
+		activationDepth += 1;
+		const host = hostnameInput.trim().toLowerCase();
+		clearStatus();
+		try {
+			await refresh();
+			const foundry = plugin.foundryPublishService;
+			const primary = activeHostname;
+			if (foundry && projectName && primary) {
+				await foundry.markBindingCustom({
+					workspacePath: plugin.absWorkspacePath,
+					projectName,
+					hostname: primary,
+				});
+			}
+			new Notice(
+				`${t('ui.domain_bound_label')} ${host} — ${t('ui.domain_done_hint')}`,
+				6000,
+			);
+			if (primary && host === primary) onDomainActive?.(primary);
+		} finally {
+			activationDepth -= 1;
 		}
-		activeHostname = hostnameInput;
-		domainStatus = 'active';
-		certStatus = 'active';
+	}
+
+	function startAdd() {
+		domainId = null;
+		hostnameInput = '';
+		domainStatus = activeHostname ? 'active' : domainStatus;
+		certStatus = '';
+		sslStatus = '';
+		txtName = '';
+		txtValue = '';
+		sslTxts = [];
+		dcvCnames = [];
+		step = 'hostname';
+		clearStatus();
+	}
+
+	function cancelAdd() {
+		domainId = null;
+		hostnameInput = '';
+		txtName = '';
+		txtValue = '';
+		sslTxts = [];
+		dcvCnames = [];
 		step = 'done';
 		clearStatus();
-		new Notice(
-			`${t('ui.domain_bound_label')} ${hostnameInput} — ${t('ui.domain_done_hint')}`,
-			6000,
-		);
-		onDomainActive?.(hostnameInput);
 	}
 
 	async function openAccountUpgrade() {
@@ -384,6 +437,7 @@
 
 	function resetLocalDomainState(next: DomainStep) {
 		domainId = null;
+		attached = [];
 		activeHostname = null;
 		hostnameInput = '';
 		domainStatus = '';
@@ -398,12 +452,15 @@
 		clearStatus();
 	}
 
-	async function revokeDomain() {
-		if (!domainId || !plugin.foundryPublishService) return;
+	async function revokeDomain(row: ListedDomain) {
+		if (!row.id || !plugin.foundryPublishService) return;
+		const othersStay = attached.some(
+			(d) => d.id !== row.id && (d.status === 'active' || d.status === 'paused'),
+		);
 		const ok = confirm(
-			t('ui.domain_unbind_confirm').replace(
+			t(othersStay ? 'ui.domain_unbind_confirm_extra' : 'ui.domain_unbind_confirm').replace(
 				'{{host}}',
-				activeHostname || hostnameInput || '',
+				row.hostname,
 			),
 		);
 		if (!ok) return;
@@ -415,25 +472,35 @@
 		busy = true;
 		clearStatus();
 		const foundry = plugin.foundryPublishService;
-		const removingId = domainId;
-		const res = await foundry.removeDomain(token, removingId);
+		const wasPrimary = row.hostname === activeHostname;
+		const res = await foundry.removeDomain(token, row.id);
 		if (!res.success) {
 			busy = false;
 			setStatus(res.error || 'Failed to unbind domain', true);
 			return;
 		}
-		if (projectName) {
-			await foundry.markBindingShare({
-				workspacePath: plugin.absWorkspacePath,
-				projectName,
-				publicBaseUrl: plugin.settings.cloudflarePublicBaseUrl,
-			});
+		await refresh();
+		if (wasPrimary) {
+			if (activeHostname && projectName) {
+				await foundry.markBindingCustom({
+					workspacePath: plugin.absWorkspacePath,
+					projectName,
+					hostname: activeHostname,
+				});
+				onDomainActive?.(activeHostname);
+			} else {
+				if (projectName) {
+					await foundry.markBindingShare({
+						workspacePath: plugin.absWorkspacePath,
+						projectName,
+						publicBaseUrl: plugin.settings.cloudflarePublicBaseUrl,
+					});
+				}
+				onDomainCleared?.();
+			}
 		}
 		busy = false;
-		resetLocalDomainState(canDomain ? 'hostname' : 'idle');
-		onDomainCleared?.();
 		new Notice(t('ui.domain_unbind_done'), 3000);
-		await refresh();
 	}
 
 	$: cnameHost = hostnameInput ? relativeHost(hostnameInput) : 'www';
@@ -489,6 +556,47 @@
 				<p class="field-hint">{t('ui.domain_upgrade_hint')}</p>
 				<button class="btn btn-primary" on:click={openAccountUpgrade}>{t('ui.account_upgrade_personal')}</button>
 			{:else}
+				{#if boundRows.length}
+					<div class="domain-list">
+						{#each boundRows as row (row.id)}
+							<div class="domain-bound">
+								<div class="domain-bound-left">
+									{#if row.status.toLowerCase() === 'paused'}
+										<span>{row.hostname}</span>
+										<span class="field-hint">{t('ui.domain_status_paused')}</span>
+									{:else}
+										<span class="domain-check">✓</span>
+										<span>{t('ui.domain_bound_label')} {row.hostname}</span>
+										<a
+											class="domain-open"
+											href={`https://${row.hostname}/`}
+											target="_blank"
+											rel="noopener"
+											title="Open"
+										>↗</a>
+									{/if}
+								</div>
+								<button
+									class="btn btn-secondary"
+									type="button"
+									on:click={() => revokeDomain(row)}
+									disabled={busy}
+								>
+									{t('ui.domain_revoke')}
+								</button>
+							</div>
+						{/each}
+					</div>
+					{#if activeHostname}
+						<p class="field-hint">{t('ui.domain_done_hint')}</p>
+					{/if}
+					{#if step === 'done' && canAddMore}
+						<button class="btn btn-secondary domain-add" type="button" on:click={startAdd} disabled={busy}>
+							{t('ui.domain_add_another')}
+						</button>
+					{/if}
+				{/if}
+
 				{#if step === 'hostname' || step === 'idle'}
 					<div class="dns-guide">
 						<div class="dns-guide-title">{t('ui.domain_step1_title')}</div>
@@ -505,6 +613,11 @@
 						<button class="btn btn-primary" on:click={submitHostname} disabled={busy}>
 							{t('ui.domain_step1_cta')}
 						</button>
+						{#if boundRows.length}
+							<button class="btn btn-secondary" type="button" on:click={cancelAdd} disabled={busy}>
+								{t('ui.domain_add_cancel')}
+							</button>
+						{/if}
 					</div>
 				{/if}
 
@@ -648,30 +761,6 @@
 					</div>
 				{/if}
 
-				{#if step === 'done' && activeHostname}
-					<div class="domain-bound">
-						<div class="domain-bound-left">
-							<span class="domain-check">✓</span>
-							<span>{t('ui.domain_bound_label')} {activeHostname}</span>
-							<a
-								class="domain-open"
-								href={`https://${activeHostname}/`}
-								target="_blank"
-								rel="noopener"
-								title="Open"
-							>↗</a>
-						</div>
-						<button
-							class="btn btn-secondary"
-							type="button"
-							on:click={revokeDomain}
-							disabled={busy}
-						>
-							{t('ui.domain_revoke')}
-						</button>
-					</div>
-					<p class="field-hint">{t('ui.domain_done_hint')}</p>
-				{/if}
 			{/if}
 
 			{#if statusMsg}
@@ -703,6 +792,17 @@
 
 	.mdf-fold-chevron.is-open {
 		transform: rotate(90deg);
+	}
+
+	.domain-list {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin-top: 4px;
+	}
+
+	.domain-add {
+		margin-top: 8px;
 	}
 
 	.domain-bound {

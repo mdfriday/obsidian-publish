@@ -26,6 +26,7 @@ import {
 import { brandPathsFromParams } from '../branding/brand-path';
 import { syncSubscribeOnPublish } from '../subscribe/subscribe-service';
 import { stageBrandAssets } from '../branding/stage-brand-assets';
+import { primaryDomain } from './domain-order';
 
 /** Share mode path prefix. Host stays on canonicalHost. arch/03 §3 */
 export function computeShareBaseUrl(_publicBaseUrl: string, siteId: string): string {
@@ -733,9 +734,7 @@ export class ProjectServiceManager {
 		// Prefer live domain state over local binding (activation may have flipped remote only)
 		if (binding.cloudflareProjectId) {
 			const domains = await foundry.listDomains(auth.token, binding.cloudflareProjectId);
-			const active = domains.domains?.find(
-				(d) => d.status === 'active' || d.certStatus === 'active',
-			);
+			const active = primaryDomain(domains.domains);
 			if (active?.hostname) {
 				hostingMode = 'custom';
 				baseURL = computeCustomBaseUrl(active.hostname);

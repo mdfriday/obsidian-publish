@@ -2330,10 +2330,14 @@
 			if (name && hasLocalBinding) {
 				try {
 					const domains = await foundry.listDomains(token, projectId);
-					const list = domains.domains || [];
-					const active = list.find((d) => d.status === 'active' || d.status === 'pending');
-					if (active?.id) {
-						await foundry.removeDomain(token, active.id);
+					const list = (domains.domains || []).filter((d) => {
+						const st = (d.status || '').toLowerCase();
+						return st !== 'removed' && st !== 'unbound';
+					});
+					for (const domain of list) {
+						if (domain.id) await foundry.removeDomain(token, domain.id);
+					}
+					if (list.length) {
 						await foundry.markBindingShare({
 							workspacePath: plugin.absWorkspacePath,
 							projectName: name,
