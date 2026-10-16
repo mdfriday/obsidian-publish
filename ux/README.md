@@ -34,7 +34,7 @@ Plan: **pill in header** → Apple-style tier cards popover (not a third tab). F
 
 | Tier | Best for | Highlights | CTA |
 |------|----------|------------|-----|
-| **Guest** | Try one note | No account · **unlimited sites** · builds/exports unlimited · **5 MB** (enough to try one note) · CDN · Note/Wiki · clears next **UTC 00:00** · first Turnstile on mdfriday.com | Install plugin |
+| **Guest** | Try one note | No account · **unlimited sites** · builds/exports unlimited · **100 MB** (enough to try a whole site) · CDN · Note/Wiki · clears next **UTC 00:00** · first Turnstile on mdfriday.com | Install plugin |
 | **Free** | Ongoing free publishing | Everything in Guest + **200 MB permanent** · unlimited sites · claim Guest same URL · account manage · soft-archive after long inactivity | Sign up free (`https://mdfriday.com/account/`) |
 | **Personal** | Your domain & lasting sites | Everything in Free + **5 GB** · **1 custom domain** ($5/month or $50/year; **3 domains** on $60/year) + HTTPS · **release history & rollback** | Upgrade to Personal |
 

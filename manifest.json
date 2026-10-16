@@ -2,7 +2,7 @@
 	"id": "mdfriday-publish",
 	"name": "MDFriday Publish",
 	"minAppVersion": "1.13.0",
-	"description": "Right-click a folder or a file, publish your website. No account, no Git, no setup.",
+	"description": "Right-click a folder or file to publish a wiki, digital garden or website. No account, no Git, no setup.",
 	"author": "sunwei",
 	"authorUrl": "https://mdfriday.com",
 	"isDesktopOnly": true,

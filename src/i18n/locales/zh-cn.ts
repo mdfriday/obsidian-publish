@@ -28,7 +28,7 @@ export const zhCn = {
 		plan_guest_price: "免费 · 无需账号",
 		plan_guest_b1: "无需账号即可发布",
 		plan_guest_b_projects: "站点不限",
-		plan_guest_b3: "5 MB 存储",
+		plan_guest_b3: "100 MB 存储",
 		plan_guest_b4: "全球 CDN 与分享链接",
 		plan_guest_b5: "Note & Wiki 主题 · 本地预览",
 		plan_guest_note: "内容在下一个 UTC 00:00 清空（认领到 Free 可保留）",
@@ -189,7 +189,7 @@ export const zhCn = {
 		softgate_later: "稍后再说",
 		err_quota_projects_guest: "已达到站点上限。免费注册可获得 200 MB 永久存储，并保留现有链接。",
 		err_quota_projects_free: "Free 站点数量异常受限。升级 Personal 可获得自定义域名与更大存储，或联系支持。",
-		err_quota_storage_guest: "Guest 存储（5 MB）已满。免费注册可获得 200 MB，或删减文件后重试。",
+		err_quota_storage_guest: "Guest 存储（100 MB）已满。免费注册可获得 200 MB，或删减文件后重试。",
 		err_quota_storage_free: "Free 存储（200 MB）已满。升级 Personal 可获得 5 GB，或删减文件后重试。",
 		err_quota_storage_personal: "存储配额已满。请腾出空间后重试，若异常请联系支持。",
 		err_network_publish:

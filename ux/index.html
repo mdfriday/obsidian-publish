@@ -808,7 +808,7 @@
             <ul class="pp-benefits">
               <li>无需账号即可发布</li>
               <li>站点 / 构建 / 导出不限次数</li>
-              <li>5 MB 存储</li>
+              <li>100 MB 存储</li>
               <li>全球 CDN 与分享链接</li>
               <li>Note & Wiki 主题 · 本地预览</li>
               <li class="note">内容在下一个 UTC 00:00 清空（认领到 Free 可保留）</li>
@@ -1435,7 +1435,7 @@
     if (state.plan === 'guest') {
       el.style.display = '';
       const v = state.firstPublishVerified ? '已完成首次验证' : '首次发布需人机验证';
-      el.innerHTML = 'Guest · 5 MB 存储 · 内容于下一个 <strong>UTC 00:00</strong> 清空（认领 Free 可保留） · ' + v +
+      el.innerHTML = 'Guest · 100 MB 存储 · 内容于下一个 <strong>UTC 00:00</strong> 清空（认领 Free 可保留） · ' + v +
         ' · <button class="link" data-open-plan>查看计划</button>';
     } else if (state.plan === 'free') {
       el.style.display = '';

@@ -491,7 +491,7 @@ export class ProjectServiceManager {
 		this.plugin.settings.mdfQuotaMaxProjects = this.plugin.settings.mdfQuotaMaxProjects ?? 1;
 		this.plugin.settings.mdfStorageBytes = this.plugin.settings.mdfStorageBytes ?? 0;
 		this.plugin.settings.mdfQuotaStorageBytes =
-			this.plugin.settings.mdfQuotaStorageBytes ?? 5 * 1024 * 1024;
+			this.plugin.settings.mdfQuotaStorageBytes ?? 100 * 1024 * 1024;
 		await this.plugin.saveSettings();
 		foundry.setKey(key, 'guest');
 		this.plugin.refreshSettingsUi();
@@ -731,8 +731,9 @@ export class ProjectServiceManager {
 		let canonicalHost = computeCanonicalHost(publicBaseUrl);
 		let publicUrl = canonicalHost && baseURL ? `${canonicalHost}${baseURL}index.html` : '';
 
-		// Prefer live domain state over local binding (activation may have flipped remote only)
-		if (binding.cloudflareProjectId) {
+		// Prefer live domain state over local binding (activation may have flipped remote only).
+		// Guests cannot have custom domains: skip the call (it would only 401 on older servers).
+		if (binding.cloudflareProjectId && auth.kind !== 'guest') {
 			const domains = await foundry.listDomains(auth.token, binding.cloudflareProjectId);
 			const active = primaryDomain(domains.domains);
 			if (active?.hostname) {
@@ -986,6 +987,9 @@ export class ProjectServiceManager {
 			const result = await this.plugin.foundryBuildService.buildProject({
 				workspacePath: this.plugin.absWorkspacePath,
 				projectNameOrPath: projectName,
+				// Start from an empty output dir: otherwise pages of deleted/renamed notes and old
+				// hashed assets stay in the build and get published again.
+				clean: true,
 				onProgress,
 			});
 

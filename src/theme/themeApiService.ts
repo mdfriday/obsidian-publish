@@ -133,6 +133,8 @@ async function fetchEntitlements(
 ) {
 	const token = plugin?.settings.mdfKey?.trim();
 	if (!token) return null;
+	// Guests have no per-user entitlements; the public catalog context already covers them.
+	if (plugin?.settings.mdfKeyKind === 'guest') return null;
 	try {
 		const response = await requestUrl({
 			url: `${apiBase}/v1/me/theme-entitlements`,

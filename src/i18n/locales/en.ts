@@ -29,7 +29,7 @@ export const en = {
 		plan_guest_price: "Free · no account",
 		plan_guest_b1: "Publish without an account",
 		plan_guest_b_projects: "Unlimited sites",
-		plan_guest_b3: "5 MB storage",
+		plan_guest_b3: "100 MB storage",
 		plan_guest_b4: "Global CDN and share links",
 		plan_guest_b5: "Note & Wiki themes · local preview",
 		plan_guest_note: "Clears at next UTC 00:00 (claim Free to keep)",
@@ -190,7 +190,7 @@ export const en = {
 		softgate_later: "Not now",
 		err_quota_projects_guest: "Site limit reached. Sign up free for 200 MB permanent storage, and keep this URL.",
 		err_quota_projects_free: "Unexpected site limit on Free. Upgrade to Personal for a custom domain and more storage, or contact support.",
-		err_quota_storage_guest: "Guest storage (5 MB) is full. Sign up free for 200 MB, or remove files and republish.",
+		err_quota_storage_guest: "Guest storage (100 MB) is full. Sign up free for 200 MB, or remove files and republish.",
 		err_quota_storage_free: "Free storage (200 MB) is full. Upgrade to Personal for 5 GB, or remove files and republish.",
 		err_quota_storage_personal: "Storage quota exceeded. Free up space or contact support if this looks wrong.",
 		err_network_publish:

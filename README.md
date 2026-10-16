@@ -1,6 +1,6 @@
 # MDFriday Publish
 
-Right-click a folder in Obsidian. See your website. No account, no Git.
+Right-click a folder in Obsidian. See your wiki, digital garden or website. No account, no Git.
 
 1. Install MDFriday Publish from Community plugins. Desktop only.
 2. Right-click a note or a folder.
@@ -10,7 +10,7 @@ Right-click a folder in Obsidian. See your website. No account, no Git.
 - Help: https://help.mdfriday.com
 - Discord: https://discord.gg/t7FHJ6qNzT
 
-Guest is free, 5 MB, and clears at the next UTC 00:00. Free is 200 MB while you stay active. Personal is $5/month, $50/year (1 domain), or $60/year (3 domains), with 5 GB. Sites are not counted.
+Guest is free, 100 MB, and clears at the next UTC 00:00. Free is 200 MB while you stay active. Personal is $5/month, $50/year (1 domain), or $60/year (3 domains), with 5 GB. Sites are not counted.
 
 ## Publish a note exactly as you see it in Obsidian
 ![GIF: Publish a Note as-is](assets/as-is.gif)
@@ -18,7 +18,7 @@ Guest is free, 5 MB, and clears at the next UTC 00:00. Free is 200 MB while you 
 ## Publish a note with selected theme
 ![GIF: Publish a Note with theme](assets/note-theme.gif)
 
-## Publish a folder as a Wiki
+## Publish a folder as a Wiki or digital garden
 ![GIF: Publish a Wiki](assets/wiki.gif)
 
 ## Join the MDFriday Community
@@ -71,7 +71,7 @@ MDFriday is local-first, so your Markdown remains the source of truth and your b
 | --- | --- | --- | --- |
 | Price | Free, no account | Free, sign up | $5/month, or $50/year (1 domain), or $60/year (3 domains) |
 | Sites | Not counted. Limited by storage | Not counted. Limited by storage | Not counted. Limited by storage |
-| Storage | 5 MB, cleared at the next 00:00 UTC | 200 MB, kept while you stay active | 5 GB |
+| Storage | 100 MB, cleared at the next 00:00 UTC | 200 MB, kept while you stay active | 5 GB |
 | Custom domain | — | — | 1, or 3 on the $60/year plan |
 
 Full comparison: https://mdfriday.com/pricing/
